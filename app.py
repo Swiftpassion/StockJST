@@ -3,30 +3,50 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
+import json  # <--- 1. เพิ่มบรรทัดนี้สำคัญมาก
 
 # --- ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="JST Stock Dashboard", layout="wide")
 
-# --- ฟังก์ชันเชื่อมต่อ Google ---
+# --- ฟังก์ชันเชื่อมต่อ Google (ฉบับแก้ไขให้รองรับ Secrets) ---
 @st.cache_resource
 def init_connection():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
     try:
+        # 1. กรณีรันบน Streamlit Cloud
         if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
+            secret_value = st.secrets["gcp_service_account"]
+            
+            # แปลง String เป็น Dict (แก้ปัญหา seekable bit stream)
+            if isinstance(secret_value, str):
+                creds_dict = json.loads(secret_value)
+            else:
+                creds_dict = dict(secret_value)
+            
+            # แก้ปัญหา \n ใน Private Key
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        
+        # 2. กรณีรันในเครื่อง (ใช้ไฟล์ json)
         else:
             creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+            
         return gspread.authorize(creds)
+        
     except Exception as e:
-        st.error(f"เชื่อมต่อไม่ได้: {e}")
+        st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
         return None
 
 # --- ฟังก์ชันโหลดข้อมูล ---
 def load_data(sheet_id, type_):
     client = init_connection()
     if not client: return pd.DataFrame()
+    
     try:
+        # เปิดไฟล์ด้วย ID
         sheet = client.open_by_key(sheet_id).sheet1
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
@@ -48,22 +68,30 @@ def load_data(sheet_id, type_):
             if 'Qty_Sold' in df.columns:
                 df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
             return df
+            
     except Exception as e:
-        st.error(f"อ่านไฟล์ผิดพลาด: {e}")
+        st.error(f"อ่านไฟล์ผิดพลาด (ID: {sheet_id}): {e}")
+        st.info("คำแนะนำ: ตรวจสอบว่า ID ที่ใส่เป็น ID ของไฟล์ Excel/Sheet (ไม่ใช่ ID โฟลเดอร์) และแชร์ไฟล์ให้ Service Account แล้ว")
         return pd.DataFrame()
 
 # ==========================================
-# ⚡ แก้ ID ตรงนี้ครับ ⚡
+# ⚡ ตรวจสอบ ID ตรงนี้อีกครั้งครับ ⚡
 # ==========================================
-STOCK_ID = "1x3K-oekbzob1f2wmgRkQfRx8Y4DY5Sq3"
-SALE_ID = "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi"
+
+# อันนี้คือ ID ไฟล์ Stock
+STOCK_ID = "1x3K-oekbzob1f2wmgRkQfRx8Y4DY5Sq3" 
+
+# ⚠️ อันนี้ต้องแก้: คุณต้องเปิดไฟล์ Excel ยอดขาย แล้วเอา ID มาใส่ (ตอนนี้มันเป็น ID โฟลเดอร์)
+SALE_ID = "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi" 
+
 # ==========================================
 
 st.title("📊 JST Dashboard: สรุปยอดขาย & สต็อกคงเหลือ")
 
 with st.spinner('กำลังดึงข้อมูล...'):
+    # เช็คว่าผู้ใช้ลืมแก้ ID หรือไม่
     if "1vnn913SYfbgqYHmCdL9Qho7R54q4AKshv2s92IPs-XQ" in SALE_ID:
-        st.warning("⚠️ กรุณาใส่รหัสไฟล์ Sale ในโค้ดบรรทัดที่ 84 ก่อนครับ")
+        st.warning("⚠️ กรุณาแก้ไข SALE_ID ในบรรทัดที่ 84 ให้เป็น ID ของไฟล์ขายสินค้าก่อนครับ")
         st.stop()
         
     df_stock = load_data(STOCK_ID, 'stock')
@@ -118,4 +146,4 @@ if not df_stock.empty and not df_sale.empty:
             use_container_width=True, height=600, hide_index=True
         )
 else:
-    st.error("ไม่พบข้อมูล ตรวจสอบ ID ไฟล์ หรือ ชื่อหัวตารางใน Excel")
+    st.info("กำลังรอข้อมูล... หากรอนานเกินไปให้ตรวจสอบ ID ไฟล์อีกครั้ง")
