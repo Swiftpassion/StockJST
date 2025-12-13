@@ -17,7 +17,7 @@ FOLDER_ID_DATA_SALE = "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi"
 FOLDER_ID_DATA_STOCK = "1x3K-oekbzob1f2wmgRkQfRx8Y4DY5Sq3"
 
 # ==========================================
-# 2. ฟังก์ชันเชื่อมต่อ Google Cloud (Drive & Sheets)
+# 2. ฟังก์ชันเชื่อมต่อ Google Cloud (Drive & Sheets) - ฉบับแก้ไข
 # ==========================================
 @st.cache_resource
 def get_credentials():
@@ -26,23 +26,34 @@ def get_credentials():
         "https://www.googleapis.com/auth/drive"
     ]
     
+    # กรณีรันบน Streamlit Cloud
     if "gcp_service_account" in st.secrets:
         secret_value = st.secrets["gcp_service_account"]
-        # แปลง String เป็น Dict ถ้าจำเป็น
-        if isinstance(secret_value, str):
-            creds_dict = json.loads(secret_value)
+        
+        # ตรวจสอบว่า Streamlit แปลงเป็น Dict ให้แล้วหรือยัง (กรณีใส่แบบ TOML)
+        if isinstance(secret_value, dict):
+            creds_dict = secret_value
         else:
-            creds_dict = dict(secret_value)
-            
+            # กรณีเป็น String (ใส่แบบ JSON ในฟันหนู 3 ตัว)
+            try:
+                creds_dict = json.loads(secret_value)
+            except json.JSONDecodeError:
+                st.error("❌ รูปแบบ JSON ใน Secrets ไม่ถูกต้อง กรุณาตรวจสอบปีกกา { } หรือเครื่องหมายฟันหนู")
+                return None
+
         # แก้ปัญหา \n ใน Private Key
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
         return service_account.Credentials.from_service_account_info(creds_dict, scopes=scope)
-    else:
-        # กรณีรันในเครื่อง
-        return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
+    # กรณีรันในเครื่อง (Local)
+    else:
+        try:
+            return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
+        except Exception:
+            st.warning("ไม่พบไฟล์ credentials.json ในเครื่อง")
+            return None
 # ==========================================
 # 3. ฟังก์ชันค้นหาและดาวน์โหลดไฟล์จากโฟลเดอร์
 # ==========================================
