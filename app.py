@@ -3,39 +3,32 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
-import json  # <--- 1. เพิ่มบรรทัดนี้สำคัญมาก
+import json
 
 # --- ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="JST Stock Dashboard", layout="wide")
 
-# --- ฟังก์ชันเชื่อมต่อ Google (ฉบับแก้ไขให้รองรับ Secrets) ---
+# --- ฟังก์ชันเชื่อมต่อ Google ---
 @st.cache_resource
 def init_connection():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
     try:
-        # 1. กรณีรันบน Streamlit Cloud
+        # อ่าน Secrets (รองรับทั้ง String และ Dict)
         if "gcp_service_account" in st.secrets:
             secret_value = st.secrets["gcp_service_account"]
-            
-            # แปลง String เป็น Dict (แก้ปัญหา seekable bit stream)
             if isinstance(secret_value, str):
                 creds_dict = json.loads(secret_value)
             else:
                 creds_dict = dict(secret_value)
             
-            # แก้ปัญหา \n ใน Private Key
+            # แก้ \n ใน Private Key
             if "private_key" in creds_dict:
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        
-        # 2. กรณีรันในเครื่อง (ใช้ไฟล์ json)
         else:
             creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-            
         return gspread.authorize(creds)
-        
     except Exception as e:
         st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
         return None
@@ -44,7 +37,6 @@ def init_connection():
 def load_data(sheet_id, type_):
     client = init_connection()
     if not client: return pd.DataFrame()
-    
     try:
         # เปิดไฟล์ด้วย ID
         sheet = client.open_by_key(sheet_id).sheet1
@@ -52,7 +44,6 @@ def load_data(sheet_id, type_):
         df = pd.DataFrame(data)
         
         if type_ == 'stock':
-            # แปลงชื่อไทย -> อังกฤษ
             cols = {'รูปภาพ':'Image', 'รหัสสินค้า':'Product_ID', 'ชื่อสินค้า':'Product_Name', 'สินค้าคงคลัง':'Initial_Stock'}
             df = df.rename(columns={k:v for k,v in cols.items() if k in df.columns})
             if 'Initial_Stock' in df.columns:
@@ -68,37 +59,38 @@ def load_data(sheet_id, type_):
             if 'Qty_Sold' in df.columns:
                 df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
             return df
-            
     except Exception as e:
-        st.error(f"อ่านไฟล์ผิดพลาด (ID: {sheet_id}): {e}")
-        st.info("คำแนะนำ: ตรวจสอบว่า ID ที่ใส่เป็น ID ของไฟล์ Excel/Sheet (ไม่ใช่ ID โฟลเดอร์) และแชร์ไฟล์ให้ Service Account แล้ว")
+        st.error(f"อ่านไฟล์ผิดพลาด: {e}")
+        st.info(f"เช็ค ID: {sheet_id} ว่าเป็น ID ของไฟล์ (ไม่ใช่โฟลเดอร์) หรือไม่")
         return pd.DataFrame()
 
 # ==========================================
-# ⚡ ตรวจสอบ ID ตรงนี้อีกครั้งครับ ⚡
+# ⚡ แก้ ID ตรงนี้ครับ ⚡
 # ==========================================
 
-# อันนี้คือ ID ไฟล์ Stock
-STOCK_ID = "1x3K-oekbzob1f2wmgRkQfRx8Y4DY5Sq3" 
+# ✅ STOCK_ID: อันนี้ผมแก้ให้ถูกต้องแล้ว (เป็น ID ไฟล์ ไม่ใช่ ID โฟลเดอร์)
+STOCK_ID = "1vnn913SYfbgqYHmCdL9Qho7R54q4AKshv2s92IPs-XQ"
 
-# ⚠️ อันนี้ต้องแก้: คุณต้องเปิดไฟล์ Excel ยอดขาย แล้วเอา ID มาใส่ (ตอนนี้มันเป็น ID โฟลเดอร์)
-SALE_ID = "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi" 
+# ⚠️ SALE_ID: อันนี้คุณต้องแก้เอง! (ตอนนี้มันยังเป็น ID โฟลเดอร์อยู่ ใช้ไม่ได้)
+# วิธีหา: เข้าโฟลเดอร์ DATA SALE -> เปิดไฟล์ Excel -> ก๊อป ID บนลิงก์มาใส่
+SALE_ID = "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi"  # <--- ❌ ลบอันนี้ แล้วเอา ID ไฟล์มาใส่
 
 # ==========================================
 
 st.title("📊 JST Dashboard: สรุปยอดขาย & สต็อกคงเหลือ")
 
 with st.spinner('กำลังดึงข้อมูล...'):
-    # เช็คว่าผู้ใช้ลืมแก้ ID หรือไม่
-    if "1vnn913SYfbgqYHmCdL9Qho7R54q4AKshv2s92IPs-XQ" in SALE_ID:
-        st.warning("⚠️ กรุณาแก้ไข SALE_ID ในบรรทัดที่ 84 ให้เป็น ID ของไฟล์ขายสินค้าก่อนครับ")
+    # เช็คว่าผู้ใช้ใส่ ID โฟลเดอร์มาหรือไม่ (ดักจับ ID โฟลเดอร์ที่คุณชอบเผลอใส่มา)
+    if SALE_ID == "1jFoara-yXT8FKy1hVjs3MyedG7O6lZRi":
+        st.error("🚨 คุณยังใส่ ID ของ 'โฟลเดอร์' อยู่ครับ!")
+        st.warning("โปรแกรมต้องการ ID ของ 'ไฟล์'.. กรุณาเปิดไฟล์ Excel ยอดขาย แล้วก๊อปปี้ ID จาก URL มาใส่ในบรรทัดที่ 88 ครับ")
+        st.image("https://i.imgur.com/K3bM5bB.png", caption="ตัวอย่าง: ต้องเอา ID ตรงกรอบสีแดง (ของไฟล์) มาใส่นะครับ")
         st.stop()
         
     df_stock = load_data(STOCK_ID, 'stock')
     df_sale = load_data(SALE_ID, 'sale')
 
 if not df_stock.empty and not df_sale.empty:
-    # คำนวณสต็อก
     sold = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
     merged = pd.merge(df_stock, sold, on='Product_ID', how='left')
     merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
@@ -106,7 +98,6 @@ if not df_stock.empty and not df_sale.empty:
     
     merged['Status'] = merged['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ใกล้หมด" if x<10 else "🟢 ปกติ"))
 
-    # แสดงผล
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📦 สินค้าทั้งหมด", len(merged))
     c2.metric("💰 ขายออก (ชิ้น)", int(df_sale['Qty_Sold'].sum()))
@@ -129,7 +120,7 @@ if not df_stock.empty and not df_sale.empty:
         st.dataframe(df_sale.sort_values('Order_Time', ascending=False).head(10), use_container_width=True)
 
     with tab2:
-        st.subheader("ตารางตัดสต็อก (Stock - Sale = คงเหลือ)")
+        st.subheader("ตารางตัดสต็อก")
         status_filter = st.multiselect("เลือกสถานะ:", ["🔴 หมด", "⚠️ ใกล้หมด", "🟢 ปกติ"], default=["🔴 หมด", "⚠️ ใกล้หมด"])
         show = merged[merged['Status'].isin(status_filter)]
         
@@ -146,4 +137,4 @@ if not df_stock.empty and not df_sale.empty:
             use_container_width=True, height=600, hide_index=True
         )
 else:
-    st.info("กำลังรอข้อมูล... หากรอนานเกินไปให้ตรวจสอบ ID ไฟล์อีกครั้ง")
+    st.info("...รอข้อมูล...")
