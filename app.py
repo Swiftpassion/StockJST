@@ -178,7 +178,7 @@ with st.spinner('กำลังโหลดข้อมูล...'):
     else:
         df_po_display = df_po.copy()
 
-tab1, tab2 = st.tabs(["📈 ภาพรวมสินค้า (Dashboard)", "📝 รายการสั่งซื้อ (PO List)"])
+tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
 # TAB 1: Dashboard
@@ -340,7 +340,7 @@ with tab2:
                     st.markdown("---")
                     f_col1, f_col2 = st.columns([2, 1])
                     with f_col1:
-                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
+                        st.caption(f"💡 ระบบคำนวณอัติโนมัติ ยอดแนะนำ: {calc_guide:,.2f}")
                         initial_total = val_num("Total_Yuan")
                         if initial_total is None:
                             initial_total = calc_guide if calc_guide > 0 else None
@@ -376,7 +376,7 @@ with tab2:
 
     # --- UI Logic ---
     col_head, col_action = st.columns([4, 2])
-    with col_head: st.subheader("📋 รายการสั่งซื้อสินค้า (PO Log)")
+    with col_head: st.subheader("📋 สรุปประวัติรายการสั่งซื้อสินค้า")
     with col_action:
         # แบ่งเป็น 2 ปุ่มชัดเจน
         b1, b2 = st.columns(2)
