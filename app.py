@@ -96,7 +96,6 @@ def get_po_data():
             df = pd.DataFrame(data)
             
             # [Trick] สร้าง Column เก็บเลขบรรทัดจริงใน Sheet เพื่อใช้ตอนแก้ไข (Row 2 คือ Data เริ่มต้น)
-            # เราจะซ่อน Column นี้ไม่ให้ User เห็น
             df['Sheet_Row_Index'] = range(2, len(df) + 2) 
             
             return df
@@ -128,7 +127,6 @@ def save_po_to_sheet(data_row, row_index=None):
                 
         if row_index:
             # กรณีแก้ไข: Update บรรทัดเดิม
-            # สร้าง Range เช่น A5:P5
             range_name = f"A{row_index}:P{row_index}" 
             ws.update(range_name, [formatted_row])
         else:
@@ -229,10 +227,8 @@ with tab2:
         st.markdown("##### 1. ค้นหารหัสสินค้า")
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
-        # หา Index เริ่มต้นของ Dropdown
         default_idx = None
         if mode == "edit" and "Product_ID" in d:
-             # พยายามหา index ของสินค้าเดิม
              matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]))]
              if matches: default_idx = matches[0]
 
@@ -259,7 +255,6 @@ with tab2:
             with col_right_form:
                 with st.form("po_form", border=False):
                     st.markdown("###### 📄 ข้อมูลทั่วไป")
-                    # Helper function to get date object
                     def get_date_val(val):
                         if not val or val == "" or val == "nan": return None
                         try:
@@ -282,7 +277,6 @@ with tab2:
                     st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
                     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
                     
-                    # Helper to safeguard None/0.0
                     def val_num(key, default=None):
                         v = d.get(key)
                         return float(v) if v and str(v) != "nan" and float(v) != 0 else default
@@ -313,7 +307,6 @@ with tab2:
                     with f_col1:
                         st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f} (คุณแก้ตัวเลขด้านล่างได้)")
                         initial_total = val_num("Total_Yuan")
-                        # ถ้าไม่มีค่าเดิม ให้ใช้ค่าคำนวณ แต่ถ้าคำนวณเป็น 0 ให้เป็น None
                         if initial_total is None:
                             initial_total = calc_guide if calc_guide > 0 else None
                             
@@ -342,7 +335,6 @@ with tab2:
                                 p_shopee or 0, p_tiktok or 0, fees or 0, transport
                             ]
                             
-                            # ส่ง row_index ไปด้วยถ้าเป็นการแก้ไข
                             if save_po_to_sheet(new_row, row_index=sheet_row_index): 
                                 st.success("บันทึกเรียบร้อย!")
                                 st.rerun()
@@ -374,11 +366,19 @@ with tab2:
         cols_to_show = [c for c in display_cols if c in df_po_display.columns]
 
         # -----------------------------------------------------
-        # ส่วนจัดการ Event การเลือกแถว (Selection)
+        # [แก้ไขบั๊ก] เปลี่ยนมาใช้ Checkbox Column ในการเลือกแถว
         # -----------------------------------------------------
-        event = st.data_editor(
-            df_po_display[cols_to_show],
+        
+        # เพิ่มคอลัมน์ "เลือก" เป็น Boolean
+        df_po_display.insert(0, "เลือก", False)
+        
+        # แสดงตาราง โดยให้แก้ไขได้เฉพาะคอลัมน์ "เลือก"
+        # คอลัมน์อื่นๆ ใส่ใน disabled
+        
+        edited_df = st.data_editor(
+            df_po_display[["เลือก"] + cols_to_show],
             column_config={
+                "เลือก": st.column_config.CheckboxColumn("เลือก", width="small"),
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width="small"),
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width="small"),
                 "PO_Number": st.column_config.TextColumn("เลข PO", width="small"),
@@ -389,24 +389,24 @@ with tab2:
                 "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
                 "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
             },
-            height=700, use_container_width=True, hide_index=True, disabled=True,
-            # เพิ่มคำสั่งให้เลือกแถวได้
-            selection_mode="single-row",
-            on_select="rerun"
+            height=700, 
+            use_container_width=True, 
+            hide_index=True,
+            # ปิดการแก้ไขทุกคอลัมน์ ยกเว้น "เลือก"
+            disabled=cols_to_show 
         )
         
-        # ตรวจสอบว่ามีการเลือกแถวหรือไม่
-        if len(event.selection.rows) > 0:
-            selected_index = event.selection.rows[0]
-            # ดึงข้อมูลจาก Dataframe หลัก โดยใช้ index ที่เลือก
-            selected_row_data = df_po_display.iloc[selected_index]
-            
-            # ดึงเลขบรรทัดจริงของ Google Sheet (ที่เราแอบสร้างไว้)
+        # ตรวจสอบว่ามีการติ๊กถูกช่องไหนบ้าง
+        selected_rows = edited_df[edited_df["เลือก"] == True]
+        
+        if not selected_rows.empty:
+            # เอาแถวแรกที่เลือก (กรณีเผลอเลือกหลายอัน)
+            selected_row_data = selected_rows.iloc[0]
             sheet_row_id = int(selected_row_data['Sheet_Row_Index'])
             
-            st.info(f"👉 คุณกำลังเลือกรายการ: **{selected_row_data['Product_ID']} (PO: {selected_row_data['PO_Number']})**")
+            st.info(f"👉 คุณเลือกรายการ: **{selected_row_data['Product_ID']} (PO: {selected_row_data['PO_Number']})**")
             
-            # ปุ่มแก้ไข (กดแล้วเปิด Dialog ในโหมด edit)
+            # ปุ่มแก้ไข
             if st.button("✏️ แก้ไขรายการที่เลือก", type="secondary"):
                 po_form_dialog(mode="edit", default_data=selected_row_data, sheet_row_index=sheet_row_id)
                 
