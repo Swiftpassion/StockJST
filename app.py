@@ -209,14 +209,14 @@ if not df_stock.empty and not df_sale.empty:
             show_df['Product_ID'].astype(str).str.contains(search_query, case=False, na=False)
         ]
     
-    show_df = show_df.sort_values(by='Current_Stock')
-    
-    # --- 3. Table Display ---
+    # --- 3. Table Display (ปรับแก้ความสูงของแถว) ---
     st.data_editor(
         show_df[['Image', 'Product_ID', 'Product_Name', 'Initial_Stock', 'Qty_Sold', 'Current_Stock', 'Status']],
         column_config={
             "Image": st.column_config.ImageColumn(
                 "รูปสินค้า", 
+                # แนะนำให้ใช้ "large" (400px) หรือกำหนดตัวเลขเช่น 300, 400
+                # ถ้าใช้ 800 แถวจะสูงมากครับ
                 width="large", 
                 help="รูปสินค้าจาก Master Sheet"
             ),
@@ -232,7 +232,11 @@ if not df_stock.empty and not df_sale.empty:
         },
         use_container_width=True,
         height=800,
-        hide_index=True
+        hide_index=True,
+        # --- เพิ่มบรรทัดนี้ครับ ---
+        # กำหนดความสูงของแถวเป็น pixel (ลองปรับตัวเลขนี้ดูครับ เช่น 150, 200, 250)
+        # ค่ายิ่งน้อย ช่องยิ่งเตี้ยครับ
+        row_height=200 
     )
 
 else:
