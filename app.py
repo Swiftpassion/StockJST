@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import json
+import time
 from datetime import date, datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -63,6 +64,9 @@ def get_credentials():
 # ==========================================
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
+
+# [FIX 429 ERROR] เพิ่ม Cache ttl=300 (5 นาที) เพื่อไม่ให้ดึงข้อมูลซ้ำบ่อยเกินไป
+@st.cache_data(ttl=300)
 def get_stock_from_sheet():
     try:
         creds = get_credentials()
@@ -76,9 +80,12 @@ def get_stock_from_sheet():
             df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         return df
     except Exception as e:
-        st.error(f"❌ อ่าน Master Sheet ไม่สำเร็จ: {e}")
+        # ถ้า Error ให้คืนค่าว่างและแจ้งเตือน แต่ไม่หยุดโปรแกรม
+        st.warning(f"⚠️ โหลด Master Sheet ไม่ทัน (Limit): {e}")
         return pd.DataFrame()
 
+# [FIX 429 ERROR] เพิ่ม Cache ให้ PO Data ด้วย
+@st.cache_data(ttl=300)
 def get_po_data():
     try:
         creds = get_credentials()
@@ -102,14 +109,12 @@ def get_po_data():
         except gspread.WorksheetNotFound:
             return pd.DataFrame()
     except Exception as e:
-        st.error(f"❌ อ่านข้อมูล PO ไม่สำเร็จ: {e}")
+        st.warning(f"⚠️ โหลด PO Data ไม่ทัน (Limit): {e}")
         return pd.DataFrame()
 
 def save_po_to_sheet(data_row, row_index=None):
     """
     บันทึกข้อมูลลง Google Sheet
-    - ถ้า row_index เป็น None = เพิ่มแถวใหม่ (Append)
-    - ถ้ามี row_index = แก้ไขแถวเดิม (Update)
     """
     try:
         creds = get_credentials()
@@ -133,12 +138,15 @@ def save_po_to_sheet(data_row, row_index=None):
             # กรณีเพิ่มใหม่: Append
             ws.append_row(formatted_row)
             
+        # [CRITICAL] ล้าง Cache ทันทีที่มีการบันทึก เพื่อให้เห็นข้อมูลใหม่
         st.cache_data.clear() 
         return True
     except Exception as e:
         st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
         return False
 
+# [FIX 429 ERROR] เพิ่ม Cache ให้ Excel Sale ด้วย
+@st.cache_data(ttl=300)
 def get_sale_from_folder():
     try:
         creds = get_credentials()
@@ -163,7 +171,7 @@ def get_sale_from_folder():
             df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
         return df
     except Exception as e:
-        st.error(f"❌ อ่านไฟล์ Excel Sale ไม่สำเร็จ: {e}")
+        st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
 
 # ==========================================
@@ -217,11 +225,9 @@ with tab1:
 # TAB 2: Purchase Orders
 # ==========================================
 with tab2:
-    # ฟังก์ชัน Dialog สำหรับ Add/Edit (รวมไว้ที่เดียว)
     @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
     def po_form_dialog(mode="add", default_data=None, sheet_row_index=None):
         
-        # --- เตรียมข้อมูล Default ---
         d = default_data if default_data is not None else {}
         
         st.markdown("##### 1. ค้นหารหัสสินค้า")
@@ -362,18 +368,10 @@ with tab2:
                         "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", 
                         "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type"]
         
-        # คอลัมน์ที่จะโชว์ในตาราง (ไม่รวม Sheet_Row_Index)
         cols_to_show = [c for c in display_cols if c in df_po_display.columns]
 
-        # -----------------------------------------------------
-        # [แก้ไขบั๊ก] เปลี่ยนมาใช้ Checkbox Column ในการเลือกแถว
-        # -----------------------------------------------------
-        
-        # เพิ่มคอลัมน์ "เลือก" เป็น Boolean
+        # Checkbox Column Selection
         df_po_display.insert(0, "เลือก", False)
-        
-        # แสดงตาราง โดยให้แก้ไขได้เฉพาะคอลัมน์ "เลือก"
-        # คอลัมน์อื่นๆ ใส่ใน disabled
         
         edited_df = st.data_editor(
             df_po_display[["เลือก"] + cols_to_show],
@@ -392,21 +390,17 @@ with tab2:
             height=700, 
             use_container_width=True, 
             hide_index=True,
-            # ปิดการแก้ไขทุกคอลัมน์ ยกเว้น "เลือก"
             disabled=cols_to_show 
         )
         
-        # ตรวจสอบว่ามีการติ๊กถูกช่องไหนบ้าง
         selected_rows = edited_df[edited_df["เลือก"] == True]
         
         if not selected_rows.empty:
-            # เอาแถวแรกที่เลือก (กรณีเผลอเลือกหลายอัน)
             selected_row_data = selected_rows.iloc[0]
             sheet_row_id = int(selected_row_data['Sheet_Row_Index'])
             
             st.info(f"👉 คุณเลือกรายการ: **{selected_row_data['Product_ID']} (PO: {selected_row_data['PO_Number']})**")
             
-            # ปุ่มแก้ไข
             if st.button("✏️ แก้ไขรายการที่เลือก", type="secondary"):
                 po_form_dialog(mode="edit", default_data=selected_row_data, sheet_row_index=sheet_row_id)
                 
