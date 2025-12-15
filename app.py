@@ -12,7 +12,7 @@ import gspread
 # ==========================================
 st.set_page_config(page_title="JST Hybrid Dashboard", layout="wide")
 
-# CSS: Card UI + จัดกึ่งกลางหัวตาราง
+# CSS: Card UI + จัดกึ่งกลางหัวตาราง + จัดระเบียบปุ่ม
 st.markdown("""
 <style>
     /* Card Container */
@@ -50,6 +50,11 @@ st.markdown("""
     /* จัดกึ่งกลางหัวตาราง */
     [data-testid="stDataFrame"] th {
         text-align: center !important;
+    }
+    
+    /* ปรับปุ่มให้สวยงาม */
+    .stButton button {
+        width: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -129,12 +134,22 @@ def get_sale_from_folder():
         return pd.DataFrame()
 
 # ==========================================
-# 4. แสดงผล Dashboard
+# 4. Callback Functions (สำหรับปุ่ม)
+# ==========================================
+def clear_filters():
+    # รีเซ็ตค่าตัวกรองกลับเป็นค่าเริ่มต้น
+    st.session_state["status_filter_key"] = ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"]
+    st.session_state["search_box_key"] = None
+
+def update_data():
+    st.cache_data.clear()
+
+# ==========================================
+# 5. แสดงผล Dashboard
 # ==========================================
 st.title("📊 JST Hybrid Dashboard")
 
-if st.button("🔄 อัปเดตข้อมูล"):
-    st.cache_data.clear()
+# (เอาปุ่มอัปเดตแบบเก่าออก แล้วย้ายไปข้างล่างแทน)
 
 with st.spinner('กำลังรวมข้อมูล Stock (Sheet) และ Sale (Excel)...'):
     df_stock = get_stock_from_sheet()
@@ -186,29 +201,53 @@ if not df_stock.empty and not df_sale.empty:
     
     st.divider()
     
-    # --- 2. Filter & Search (เปลี่ยนเป็น Dropdown ค้นหาได้) ---
+    # --- 2. Filter & Search & Buttons ---
     st.subheader("📦 เช็คสถานะสินค้าล่าสุด")
     
-    col_filter_1, col_filter_2 = st.columns([2, 1])
+    # กำหนดค่าเริ่มต้นให้กับ Session State ถ้ายังไม่มี
+    if "status_filter_key" not in st.session_state:
+        st.session_state["status_filter_key"] = ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"]
+    if "search_box_key" not in st.session_state:
+        st.session_state["search_box_key"] = None
+
+    # แบ่งคอลัมน์ [สถานะ, ค้นหา, ปุ่มล้าง, ปุ่มอัพเดต]
+    # ปรับสัดส่วนให้พอดี: 3 ส่วน, 2 ส่วน, 0.5 ส่วน, 0.7 ส่วน
+    col_filter, col_search, col_clear, col_update = st.columns([2.5, 2, 0.5, 0.7], gap="small")
     
-    with col_filter_1:
+    with col_filter:
         filter_options = ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"]
-        status_filter = st.multiselect("กรองสถานะ", filter_options, default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
+        # ใช้ key เพื่อผูกกับ session state
+        status_filter = st.multiselect(
+            "กรองสถานะ", 
+            filter_options, 
+            key="status_filter_key"
+        )
         
-    with col_filter_2:
-        # เตรียมตัวเลือกค้นหา: รวม "ชื่อสินค้า (รหัส)" เพื่อให้ User พิมพ์ค้นหาได้ง่าย
+    with col_search:
+        # เตรียมตัวเลือกค้นหา
         merged['Search_Label'] = merged.apply(lambda x: f"{x['Product_Name']} ({x['Product_ID']})", axis=1)
         search_options = merged['Search_Label'].tolist()
         
-        # ใช้ selectbox แบบ searchable (พิมพ์แล้วตัวเลือกกรองตาม)
+        # ใช้ key เพื่อผูกกับ session state
         selected_product = st.selectbox(
             "🔍 ค้นหา (พิมพ์ชื่อสินค้า หรือ รหัส)",
             options=search_options,
-            index=None,  # เริ่มต้นเป็นค่าว่าง
-            placeholder="พิมพ์เพื่อค้นหารายการ..."
+            index=None,
+            placeholder="พิมพ์เพื่อค้นหารายการ...",
+            key="search_box_key"
         )
+
+    # ปุ่มล้าง (ใส่ margin-top เพื่อให้ปุ่มลงมาเสมอช่อง input)
+    with col_clear:
+        st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+        st.button("❌ ล้าง", on_click=clear_filters, help="ล้างตัวกรองทั้งหมด")
+
+    # ปุ่มอัพเดต
+    with col_update:
+        st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+        st.button("🔄 อัปเดต", on_click=update_data, type="primary", help="ดึงข้อมูลใหม่จาก Google Sheet/Drive")
     
-    # --- Logic การกรอง 2 ชั้น ---
+    # --- Logic การกรอง ---
     
     # 1. กรองสถานะ
     if "📦 สินค้าทั้งหมด" in status_filter or not status_filter:
@@ -216,9 +255,8 @@ if not df_stock.empty and not df_sale.empty:
     else:
         show_df = merged[merged['Status'].isin(status_filter)].copy()
         
-    # 2. กรองจาก Selectbox ที่เลือกมา
+    # 2. กรองจาก Selectbox
     if selected_product:
-        # กรองเอาเฉพาะรายการที่ตรงกับที่เลือกใน Dropdown
         show_df = show_df[show_df['Search_Label'] == selected_product]
     
     show_df = show_df.sort_values(by='Current_Stock')
@@ -245,7 +283,7 @@ if not df_stock.empty and not df_sale.empty:
         use_container_width=True,
         height=800,
         hide_index=True,
-        row_height=80 # คงค่าความสูงไว้ 80 ตามที่คุยกันล่าสุด
+        row_height=80 
     )
 
 else:
