@@ -52,7 +52,7 @@ st.markdown("""
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
     
-    /* Table Headers: จัดกึ่งกลาง + รองรับการขึ้นบรรทัดใหม่ */
+    /* Table Headers */
     [data-testid="stDataFrame"] th { 
         text-align: center !important;
         white-space: pre-wrap !important; 
@@ -60,7 +60,7 @@ st.markdown("""
         min-height: 60px;
     }
 
-    /* Table Cells: บังคับตัดคำเป็น ... ถ้าล้น */
+    /* Table Cells */
     [data-testid="stDataFrame"] td {
         white-space: nowrap;
         overflow: hidden;
@@ -202,6 +202,7 @@ def get_sale_from_folder():
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
+# โหลดข้อมูล
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
@@ -213,9 +214,67 @@ with st.spinner('กำลังโหลดข้อมูล...'):
 tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
-# TAB 1: Stock Report (MASTER BASED)
+# TAB 1: Stock Report
 # ==========================================
 with tab1:
+    # --- Function: History Dialog ---
+    @st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
+    def show_history_dialog():
+        st.caption("ค้นหาและเลือกสินค้าเพื่อดูประวัติการสั่งซื้อทั้งหมด")
+        
+        if df_master.empty or df_po.empty:
+            st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
+            return
+
+        # สร้างตัวเลือกค้นหา
+        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+        selected_product = st.selectbox(
+            "🔍 ค้นหาสินค้า (ชื่อ/รหัส)", 
+            options=product_options,
+            index=None,
+            placeholder="พิมพ์เพื่อค้นหา..."
+        )
+
+        if selected_product:
+            # ดึง Product ID
+            selected_pid = selected_product.split(" : ")[0]
+            
+            # กรองข้อมูลจาก df_po
+            history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
+            
+            if not history_df.empty:
+                # เรียงลำดับจาก ใหม่ -> เก่า (Order_Date Descending)
+                if 'Order_Date' in history_df.columns:
+                    history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
+                    history_df = history_df.sort_values(by='Order_Date', ascending=False)
+                    # แปลงกลับเป็น String เพื่อแสดงผลสวยๆ
+                    history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
+
+                st.divider()
+                st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
+                
+                # แสดงตาราง
+                st.dataframe(
+                    history_df,
+                    column_config={
+                        "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
+                        "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
+                        "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
+                        "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                        "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                        "Price_1688_WithShip": st.column_config.NumberColumn("ต้นทุน(รวมส่ง)", format="%.2f"),
+                        "Transport_Type": st.column_config.TextColumn("ขนส่ง"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
+            else:
+                st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
+
+    # ----------------------
+    # Main Dashboard Logic
+    # ----------------------
     if not df_master.empty:
         # Prepare Data
         df_po_latest = pd.DataFrame()
@@ -251,7 +310,7 @@ with tab1:
         
         st.divider()
         
-        # Filters
+        # Filters & Actions
         if 'filter_status' not in st.session_state: st.session_state.filter_status = []
         if 'search_query' not in st.session_state: st.session_state.search_query = ""
 
@@ -262,18 +321,29 @@ with tab1:
             st.cache_data.clear()
             st.rerun()
 
-        col_f1, col_f2, col_btn1, col_btn2 = st.columns([2, 2, 0.5, 0.5])
+        # [UPDATED] เพิ่มปุ่มดูประวัติใน Layout (5 Columns)
+        col_f1, col_f2, col_b1, col_b2, col_b3 = st.columns([2, 2, 0.4, 0.5, 0.5])
+        
         with col_f1:
             selected_status = st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], key="filter_status")
         with col_f2:
-            # [แก้ไข] เปลี่ยน Label และ Placeholder ตามที่ขอ
             search_text = st.text_input("ค้นหา (ชื่อ/รหัส)", key="search_query", placeholder="เช่น ชั้นวางของ, SP001...")
-        with col_btn1:
+        
+        # ปุ่มล้าง
+        with col_b1:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("❌ ล้าง", on_click=clear_filters)
-        with col_btn2:
+            st.button("❌ ล้าง", on_click=clear_filters, help="ล้างตัวกรอง")
+        
+        # ปุ่มดูประวัติ (ใหม่)
+        with col_b2:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
+            if st.button("📜 ดูประวัติ", type="secondary", help="ดูประวัติการสั่งซื้อย้อนหลัง"):
+                show_history_dialog()
+
+        # ปุ่มอัปเดต
+        with col_b3:
+            st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            st.button("🔄 อัปเดต", on_click=manual_update, type="primary", help="โหลดข้อมูลใหม่ล่าสุด")
 
         # Table Logic
         show_df = df_stock_report.copy()
@@ -282,7 +352,6 @@ with tab1:
             show_df = show_df[show_df['Status'].isin(selected_status)]
 
         if search_text:
-            # [แก้ไข] ตัด PO ออกจากการค้นหา (หาแค่ Name หรือ ID)
             mask = (
                 show_df['Product_Name'].str.contains(search_text, case=False, na=False) |
                 show_df['Product_ID'].str.contains(search_text, case=False, na=False)
