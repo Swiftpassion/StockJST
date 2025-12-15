@@ -232,88 +232,111 @@ with tab1:
 # TAB 2: Purchase Orders (ระบบใหม่)
 # ==========================================
 with tab2:
-    # --- Function: Popup Modal ---
-    @st.dialog("📝 เพิ่มรายการสั่งซื้อใหม่")
+    # --- Function: Popup Modal (Design Update) ---
+    @st.dialog("📝 บันทึกรายการสั่งซื้อ (New PO)", width="large")
     def add_po_dialog():
-        st.caption("เลือกสินค้าจาก Master แล้วกรอกรายละเอียด")
-        
-        # 1. เลือกสินค้า
-        # สร้างตัวเลือกเป็น "รหัส : ชื่อสินค้า"
+        # --- ส่วนที่ 1: ค้นหาสินค้า (อยู่ด้านบนสุด) ---
+        st.markdown("##### 1. ค้นหารหัสสินค้า")
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        selected_option = st.selectbox("ค้นหาสินค้า", product_options, index=None, placeholder="พิมพ์รหัสหรือชื่อสินค้า...")
+        selected_option = st.selectbox(
+            "พิมพ์รหัสหรือชื่อสินค้าเพื่อค้นหา", 
+            product_options, 
+            index=None, 
+            placeholder="🔍 Search...",
+            label_visibility="collapsed" # ซ่อน Label เพื่อความคลีน
+        )
         
-        master_img_url = ""
+        # ตัวแปรสำหรับเก็บข้อมูลที่จะแสดง
+        master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image" # รูป Default
         master_pid = ""
+        master_name = ""
 
+        # Logic ดึงข้อมูลเมื่อเลือกสินค้า
         if selected_option:
             master_pid = selected_option.split(" : ")[0]
             row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
-            master_img_url = row_info['Image']
-            
-            # แสดงรูปตัวอย่าง
-            c_img, c_info = st.columns([1, 3])
-            with c_img:
-                if master_img_url:
-                    st.image(master_img_url, width=100)
-            with c_info:
-                st.info(f"กำลังทำรายการสำหรับ: **{row_info['Product_Name']}**")
+            master_name = row_info['Product_Name']
+            if row_info['Image']:
+                master_img_url = row_info['Image']
 
-        st.markdown("---")
-        
-        with st.form("po_form"):
-            # Group 1: ข้อมูลทั่วไป
-            c1, c2, c3 = st.columns(3)
-            po_num = c1.text_input("เลข PO", placeholder="เช่น PO-24001")
-            order_date = c2.date_input("วันที่สั่ง", value=date.today())
-            recv_date = c3.date_input("ของมา (ประมาณ)", value=None)
-            
-            # Group 2: น้ำหนัก & ขนส่ง
-            weight_txt = st.text_area("น้ำหนักขนส่ง / รายละเอียด", height=68, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
-            
-            # Group 3: จำนวน & เรท
-            c4, c5, c6 = st.columns(3)
-            qty_ord = c4.number_input("สั่งมา (ชิ้น)", min_value=0, step=1)
-            qty_rem = c5.number_input("เหลือ (Stock)", min_value=0, step=1, value=qty_ord)
-            yuan_rate = c6.number_input("เรทหยวน", value=5.00, format="%.2f")
-            
-            # Group 4: ราคาต้นทุน
-            st.markdown("**💰 ข้อมูลราคา (CNY)**")
-            r1, r2, r3, r4 = st.columns(4)
-            p_no_vat = r1.number_input("ราคา/ชิ้น (ไม่ VAT)", min_value=0.0, format="%.2f")
-            p_1688_noship = r2.number_input("1688/ชิ้น (ไม่ส่ง)", min_value=0.0, format="%.2f")
-            p_1688_ship = r3.number_input("1688/ชิ้น (รวมส่ง)", min_value=0.0, format="%.2f")
-            fees = r4.number_input("ค่าธรรมเนียม", min_value=0.0, format="%.2f")
+        st.write("") # เว้นวรรคนิดหน่อย
 
-            # Group 5: ราคาขาย & ขนส่ง
-            st.markdown("**🏷️ ราคาขาย & ขนส่ง**")
-            r5, r6, r7 = st.columns(3)
-            p_shopee = r5.number_input("ราคา Shopee", min_value=0.0, format="%.2f")
-            p_tiktok = r6.number_input("ราคา TikTok", min_value=0.0, format="%.2f")
-            transport = r7.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"])
-
-            # คำนวณ (Auto Calculate)
-            total_yuan_calc = qty_ord * p_1688_ship
-            st.markdown(f"**∑ ยอดรวมหยวน (โดยประมาณ):** `{total_yuan_calc:,.2f}` ¥")
+        # --- ส่วนที่ 2: กล่องสี่เหลี่ยมผืนผ้า (Main Container) ---
+        # ใช้ container(border=True) เพื่อสร้างกรอบสวยงามล้อมรอบทั้งหมด
+        with st.container(border=True):
             
-            submitted = st.form_submit_button("บันทึกข้อมูล", type="primary")
+            # แบ่งหน้าจอเป็น 2 ฝั่งใหญ่: ซ้าย (รูป) 30% | ขวา (ฟอร์ม) 70%
+            col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
             
-            if submitted:
-                if not master_pid:
-                    st.error("กรุณาเลือกสินค้าก่อนบันทึก")
-                elif not po_num:
-                    st.error("กรุณากรอกเลข PO")
-                else:
-                    # เตรียมข้อมูล Save
-                    new_row = [
-                        master_pid, po_num, order_date, recv_date, weight_txt,
-                        qty_ord, qty_rem, yuan_rate, p_no_vat,
-                        p_1688_noship, p_1688_ship, total_yuan_calc,
-                        p_shopee, p_tiktok, fees, transport
-                    ]
+            # === ฝั่งซ้าย: แสดงรูปภาพ ===
+            with col_left_img:
+                st.markdown(f"**{master_pid}**") 
+                st.image(master_img_url, use_container_width=True)
+                if master_name:
+                    st.caption(f"{master_name}")
+            
+            # === ฝั่งขวา: ฟอร์มกรอกข้อมูล ===
+            with col_right_form:
+                with st.form("po_form", border=False): # ซ้อน Form ไว้ฝั่งขวา
+                    st.markdown("###### 📄 ข้อมูลทั่วไป")
+                    # แถว 1: PO, วันที่, ของมา
+                    r1c1, r1c2, r1c3 = st.columns(3)
+                    po_num = r1c1.text_input("เลข PO", placeholder="เช่น PO-24001")
+                    order_date = r1c2.date_input("วันที่สั่ง", value=date.today())
+                    recv_date = r1c3.date_input("ของมา (ประมาณ)", value=None)
                     
-                    if save_po_to_sheet(new_row):
-                        st.success("✅ บันทึกเรียบร้อย!")
-                        st.rerun()
+                    # แถว 2: น้ำหนัก/รายละเอียด (ยาวเต็มบรรทัด)
+                    weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด", height=1, placeholder="รายละเอียดการส่ง...", help="เช่น โกดังใหม่ 3 ลัง 54.99 kg")
+                    
+                    st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
+                    # แถว 3: สั่งมา, เหลือ, เรทหยวน, ค่าธรรมเนียม
+                    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+                    qty_ord = r3c1.number_input("สั่งมา (ชิ้น)", min_value=0, step=1)
+                    qty_rem = r3c2.number_input("เหลือ (Stock)", min_value=0, step=1, value=qty_ord)
+                    yuan_rate = r3c3.number_input("เรทหยวน", value=5.00, format="%.2f")
+                    fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, format="%.2f")
+                    
+                    # แถว 4: ราคาทุนต่างๆ
+                    r4c1, r4c2, r4c3 = st.columns(3)
+                    p_no_vat = r4c1.number_input("ราคา/ชิ้น (ไม่ VAT)", format="%.2f")
+                    p_1688_noship = r4c2.number_input("1688/ชิ้น (ไม่ส่ง)", format="%.2f")
+                    p_1688_ship = r4c3.number_input("1688/ชิ้น (รวมส่ง)", format="%.2f")
+
+                    st.markdown("###### 🏷️ ราคาขาย & สรุป")
+                    # แถว 5: ราคาขาย และ ขนส่ง
+                    r5c1, r5c2, r5c3 = st.columns(3)
+                    p_shopee = r5c1.number_input("Shopee (บาท)", format="%.2f")
+                    p_tiktok = r5c2.number_input("TikTok (บาท)", format="%.2f")
+                    transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"])
+
+                    # แถว 6: ยอดรวม (Highlight)
+                    total_yuan_calc = qty_ord * p_1688_ship
+                    
+                    st.markdown("---")
+                    f_col1, f_col2 = st.columns([2, 1])
+                    with f_col1:
+                        st.markdown(f"#### รวมยอดหยวน: :green[{total_yuan_calc:,.2f} ¥]")
+                    with f_col2:
+                        # ปุ่มบันทึก สีเขียว (ใช้ type=primary)
+                        submitted = st.form_submit_button("✅ บันทึกข้อมูล", type="primary", use_container_width=True)
+
+                    if submitted:
+                        if not master_pid:
+                            st.error("กรุณาเลือกสินค้าก่อน")
+                        elif not po_num:
+                            st.error("กรุณากรอกเลข PO")
+                        else:
+                            # เตรียมข้อมูล Save
+                            new_row = [
+                                master_pid, po_num, order_date, recv_date, weight_txt,
+                                qty_ord, qty_rem, yuan_rate, p_no_vat,
+                                p_1688_noship, p_1688_ship, total_yuan_calc,
+                                p_shopee, p_tiktok, fees, transport
+                            ]
+                            
+                            if save_po_to_sheet(new_row):
+                                st.success("บันทึกสำเร็จ!")
+                                st.rerun()
 
     # --- UI Main Tab 2 ---
     col_head, col_action = st.columns([4, 1])
