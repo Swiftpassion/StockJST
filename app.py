@@ -217,7 +217,7 @@ if not df_stock.empty and not df_sale.empty:
                 "รูปสินค้า", 
                 # แนะนำให้ใช้ "large" (400px) หรือกำหนดตัวเลขเช่น 300, 400
                 # ถ้าใช้ 800 แถวจะสูงมากครับ
-                width="large", 
+                width="medium", 
                 help="รูปสินค้าจาก Master Sheet"
             ),
             "Current_Stock": st.column_config.ProgressColumn(
@@ -236,7 +236,7 @@ if not df_stock.empty and not df_sale.empty:
         # --- เพิ่มบรรทัดนี้ครับ ---
         # กำหนดความสูงของแถวเป็น pixel (ลองปรับตัวเลขนี้ดูครับ เช่น 150, 200, 250)
         # ค่ายิ่งน้อย ช่องยิ่งเตี้ยครับ
-        row_height=200 
+        row_height=100 
     )
 
 else:
