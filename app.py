@@ -52,12 +52,20 @@ st.markdown("""
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
     
-    /* Table Headers: Center & Wrap Text (ให้หัวตารางขึ้นบรรทัดใหม่ได้) */
+    /* Table Headers: จัดกึ่งกลาง + รองรับการขึ้นบรรทัดใหม่ */
     [data-testid="stDataFrame"] th { 
         text-align: center !important;
         white-space: pre-wrap !important; 
-        vertical-align: top !important;
-        min-height: 50px;
+        vertical-align: middle !important;
+        min-height: 60px;
+    }
+
+    /* Table Cells: บังคับตัดคำเป็น ... ถ้าล้น */
+    [data-testid="stDataFrame"] td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 150px; /* บังคับความกว้างสูงสุดของ Cell */
     }
     
     /* Button Full Width */
@@ -220,6 +228,7 @@ with tab1:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
         
         # 2. Merge Master กับ PO ล่าสุด
+        # สำคัญ: how='left' ยึด Master เป็นหลัก สินค้าที่ไม่มี PO จะโชว์แต่ข้อมูลว่าง
         df_stock_report = pd.merge(df_master, df_po_latest, on='Product_ID', how='left')
         
         # 3. เตรียมข้อมูล Sales
@@ -329,8 +338,8 @@ with tab1:
         # ----------------------
         # Display Table Configuration
         # ----------------------
-        # กำหนดความกว้างมาตรฐานเพื่อให้เท่ากัน
-        COL_WIDTH = 110 
+        # บังคับขนาดคอลัมน์ให้เล็กเท่าๆ กัน (Pixel)
+        COL_WIDTH = 100 
         
         def color_negative_red(val):
             try: color = '#ff4d4d' if float(val) < 0 else 'white'
@@ -341,33 +350,38 @@ with tab1:
         st.dataframe(
             show_df_final.style.map(color_negative_red, subset=['Current_Stock', 'Qty_Remaining']),
             column_config={
-                "Image": st.column_config.ImageColumn("รูปสินค้า", width=COL_WIDTH),
+                # Image
+                "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
+                
+                # Text Columns (ขนาด 100-120 เพื่อให้กระชับ)
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=COL_WIDTH),
-                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=180), # ชื่อยาวหน่อย
+                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=150), # ชื่อสินค้ากว้างกว่าเพื่อนหน่อย
                 "PO_Number": st.column_config.TextColumn("เลข PO", width=COL_WIDTH),
                 "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=COL_WIDTH),
                 "Received_Date": st.column_config.TextColumn("ของมา", width=COL_WIDTH),
                 "Transport_Weight": st.column_config.TextColumn("น้ำหนัก\nขนส่ง", width=COL_WIDTH),
                 
+                # Numeric Columns
                 "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d", width=COL_WIDTH),
                 "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d", width=COL_WIDTH),
                 "Yuan_Rate": st.column_config.NumberColumn("เรท\nหยวน", format="%.2f", width=COL_WIDTH),
                 
-                "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคา/ชิ้น\nไม่รวม VAT", format="%.2f", width=COL_WIDTH),
-                "Price_1688_NoShip": st.column_config.NumberColumn("1688/ชิ้น\nไม่รวมส่ง", format="%.2f", width=COL_WIDTH),
-                "Price_1688_WithShip": st.column_config.NumberColumn("1688/ชิ้น\nรวมค่าส่ง", format="%.2f", width=COL_WIDTH),
-                "Total_Yuan": st.column_config.NumberColumn("ราคาหยวน\nทั้งหมด", format="%.2f ¥", width=COL_WIDTH),
+                # ตัดบรรทัดหัวตาราง (ใส่ \n ใน label)
+                "Price_Unit_NoVAT": st.column_config.NumberColumn(label="ราคา/ชิ้น\nไม่รวม VAT", format="%.2f", width=COL_WIDTH),
+                "Price_1688_NoShip": st.column_config.NumberColumn(label="1688/ชิ้น\nไม่รวมส่ง", format="%.2f", width=COL_WIDTH),
+                "Price_1688_WithShip": st.column_config.NumberColumn(label="1688/ชิ้น\nรวมค่าส่ง", format="%.2f", width=COL_WIDTH),
+                "Total_Yuan": st.column_config.NumberColumn(label="ราคาหยวน\nทั้งหมด", format="%.2f ¥", width=COL_WIDTH),
                 
-                "Shopee_Price": st.column_config.NumberColumn("ราคา\nShopee", format="%.2f", width=COL_WIDTH),
-                "TikTok_Price": st.column_config.NumberColumn("ราคา\nTikTok", format="%.2f", width=COL_WIDTH),
-                "Fees": st.column_config.NumberColumn("ค่า\nธรรมเนียม", format="%.2f", width=COL_WIDTH),
+                "Shopee_Price": st.column_config.NumberColumn(label="ราคา\nShopee", format="%.2f", width=COL_WIDTH),
+                "TikTok_Price": st.column_config.NumberColumn(label="ราคา\nTikTok", format="%.2f", width=COL_WIDTH),
+                "Fees": st.column_config.NumberColumn(label="ค่า\nธรรมเนียม", format="%.2f", width=COL_WIDTH),
                 "Transport_Type": st.column_config.TextColumn("การขนส่ง", width=COL_WIDTH),
                 "Qty_Sold": st.column_config.NumberColumn("ยอดขาย", format="%d", width=COL_WIDTH),
                 "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=COL_WIDTH),
                 "Status": st.column_config.TextColumn("Status", width=COL_WIDTH),
             },
             height=800,
-            use_container_width=True,
+            use_container_width=True, # ให้ตารางเต็มจอ แต่คอลัมน์จะบีบตาม config ด้านบน
             hide_index=True
         )
     else:
