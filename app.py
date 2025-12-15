@@ -25,7 +25,6 @@ st.markdown("""
     }
     .metric-title { color: #b0b0b0; font-size: 14px; font-weight: 500; margin-bottom: 5px; }
     .metric-value { color: #ffffff; font-size: 28px; font-weight: bold; }
-    .metric-sub { font-size: 12px; margin-top: 5px; }
     
     /* Border Colors */
     .border-cyan { border-left: 4px solid #00e5ff; }
@@ -40,13 +39,14 @@ st.markdown("""
     
     /* Button Full Width */
     .stButton button { width: 100%; }
-    
-    /* Custom Badge for Transport */
-    .transport-badge-sea {
-        background-color: #000; color: #f1c40f; padding: 2px 8px; border-radius: 4px; font-weight: bold; border: 1px solid #f1c40f;
+
+    /* --- CSS HACK: ซ่อนปุ่ม +/- ของ Number Input --- */
+    button[data-testid="stNumberInputStepDown"],
+    button[data-testid="stNumberInputStepUp"] {
+        display: none !important;
     }
-    .transport-badge-car {
-        background-color: #000; color: #e74c3c; padding: 2px 8px; border-radius: 4px; font-weight: bold; border: 1px solid #e74c3c;
+    div[data-testid="stNumberInput"] input {
+        text-align: left; /* จัดตัวเลขชิดซ้ายให้พิมพ์ง่าย */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -54,10 +54,10 @@ st.markdown("""
 # ==========================================
 # 2. Config & Google Cloud Connection
 # ==========================================
-# CONFIGURATION
+# กรุณาตรวจสอบ ID ให้ถูกต้อง
 MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
 TAB_NAME_STOCK = "MASTER"
-TAB_NAME_PO = "PO_DATA"  # สร้าง Tab นี้ใน Google Sheet ด้วยนะครับ
+TAB_NAME_PO = "PO_DATA" # ต้องมี Tab นี้ใน Google Sheet
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 
 @st.cache_resource
@@ -95,10 +95,15 @@ def get_po_data():
         sh = gc.open_by_key(MASTER_SHEET_ID)
         try:
             ws = sh.worksheet(TAB_NAME_PO)
-            df = pd.DataFrame(ws.get_all_records())
+            data = ws.get_all_records()
+            if not data:
+                 return pd.DataFrame(columns=["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
+                                         "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
+                                         "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
+                                         "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type"])
+            df = pd.DataFrame(data)
             return df
         except gspread.WorksheetNotFound:
-            # ถ้ายังไม่มี Tab PO ให้สร้าง DataFrame ว่างๆ รอไว้
             return pd.DataFrame(columns=["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
                                          "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
                                          "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
@@ -115,7 +120,7 @@ def save_po_to_sheet(data_row):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # แปลงวันที่ให้เป็น String ก่อนบันทึก
+        # แปลงวันที่ให้เป็น String ก่อนบันทึก เพื่อป้องกัน Error
         formatted_row = []
         for item in data_row:
             if isinstance(item, (date, datetime)):
@@ -124,7 +129,7 @@ def save_po_to_sheet(data_row):
                 formatted_row.append(item)
                 
         ws.append_row(formatted_row)
-        st.cache_data.clear() # เคลียร์ cache เพื่อให้โหลดข้อมูลใหม่
+        st.cache_data.clear() 
         return True
     except Exception as e:
         st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
@@ -167,8 +172,13 @@ st.title("📊 JST Hybrid Management System")
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
+    
     # รวมข้อมูล PO เข้ากับ Master เพื่อเอารูปมาโชว์ในตาราง PO
     if not df_po.empty and not df_master.empty:
+        # Data Cleaning: แปลง Product_ID ให้เป็น String ทั้งคู่ก่อน merge
+        df_po['Product_ID'] = df_po['Product_ID'].astype(str)
+        df_master['Product_ID'] = df_master['Product_ID'].astype(str)
+        
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image', 'Product_Name']], on='Product_ID', how='left')
     else:
         df_po_display = df_po.copy()
@@ -177,13 +187,15 @@ with st.spinner('กำลังโหลดข้อมูล...'):
 tab1, tab2 = st.tabs(["📈 ภาพรวมสินค้า (Dashboard)", "📝 รายการสั่งซื้อ (PO List)"])
 
 # ==========================================
-# TAB 1: Dashboard (Code เดิม)
+# TAB 1: Dashboard
 # ==========================================
 with tab1:
     df_sale = get_sale_from_folder()
     
     if not df_master.empty and not df_sale.empty:
         sold_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
+        sold_summary['Product_ID'] = sold_summary['Product_ID'].astype(str) # กันเหนียว
+        
         merged = pd.merge(df_master, sold_summary, on='Product_ID', how='left')
         merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
         merged['Current_Stock'] = merged['Initial_Stock'] - merged['Qty_Sold']
@@ -223,19 +235,19 @@ with tab1:
             show_df[['Image', 'Product_ID', 'Product_Name', 'Current_Stock', 'Status']],
             column_config={
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width="medium"),
-                "Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max())),
+                "Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max()) if len(merged)>0 else 100),
             },
             use_container_width=True, height=600, hide_index=True
         )
 
 # ==========================================
-# TAB 2: Purchase Orders (ระบบใหม่)
+# TAB 2: Purchase Orders (ระบบใหม่ + แก้บั๊ก)
 # ==========================================
 with tab2:
-    # --- Function: Popup Modal (Design Update) ---
+    # --- Function: Popup Modal (Final Version) ---
     @st.dialog("📝 บันทึกรายการสั่งซื้อ (New PO)", width="large")
     def add_po_dialog():
-        # --- ส่วนที่ 1: ค้นหาสินค้า (อยู่ด้านบนสุด) ---
+        # --- ส่วนที่ 1: ค้นหาสินค้า ---
         st.markdown("##### 1. ค้นหารหัสสินค้า")
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         selected_option = st.selectbox(
@@ -243,15 +255,13 @@ with tab2:
             product_options, 
             index=None, 
             placeholder="🔍 Search...",
-            label_visibility="collapsed" # ซ่อน Label เพื่อความคลีน
+            label_visibility="collapsed"
         )
         
-        # ตัวแปรสำหรับเก็บข้อมูลที่จะแสดง
-        master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image" # รูป Default
+        master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
         master_pid = ""
         master_name = ""
 
-        # Logic ดึงข้อมูลเมื่อเลือกสินค้า
         if selected_option:
             master_pid = selected_option.split(" : ")[0]
             row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
@@ -259,13 +269,10 @@ with tab2:
             if row_info['Image']:
                 master_img_url = row_info['Image']
 
-        st.write("") # เว้นวรรคนิดหน่อย
+        st.write("") 
 
-        # --- ส่วนที่ 2: กล่องสี่เหลี่ยมผืนผ้า (Main Container) ---
-        # ใช้ container(border=True) เพื่อสร้างกรอบสวยงามล้อมรอบทั้งหมด
+        # --- ส่วนที่ 2: กล่องสี่เหลี่ยมผืนผ้า ---
         with st.container(border=True):
-            
-            # แบ่งหน้าจอเป็น 2 ฝั่งใหญ่: ซ้าย (รูป) 30% | ขวา (ฟอร์ม) 70%
             col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
             
             # === ฝั่งซ้าย: แสดงรูปภาพ ===
@@ -277,65 +284,73 @@ with tab2:
             
             # === ฝั่งขวา: ฟอร์มกรอกข้อมูล ===
             with col_right_form:
-                with st.form("po_form", border=False): # ซ้อน Form ไว้ฝั่งขวา
+                with st.form("po_form", border=False):
                     st.markdown("###### 📄 ข้อมูลทั่วไป")
-                    # แถว 1: PO, วันที่, ของมา
+                    # แถว 1
                     r1c1, r1c2, r1c3 = st.columns(3)
-                    po_num = r1c1.text_input("เลข PO", placeholder="เช่น PO-24001")
+                    po_num = r1c1.text_input("เลข PO *", placeholder="ระบุเลข PO")
                     order_date = r1c2.date_input("วันที่สั่ง", value=date.today())
                     recv_date = r1c3.date_input("ของมา (ประมาณ)", value=None)
                     
-                    # แถว 2: น้ำหนัก/รายละเอียด (ยาวเต็มบรรทัด)
-                    weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด", height=1, placeholder="รายละเอียดการส่ง...", help="เช่น โกดังใหม่ 3 ลัง 54.99 kg")
+                    # แถว 2
+                    weight_txt = r1c1.text_area("📦 รายละเอียด / น้ำหนัก *", height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg")
                     
                     st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
-                    # แถว 3: สั่งมา, เหลือ, เรทหยวน, ค่าธรรมเนียม
+                    # แถว 3 (step=0 เพื่อซ่อนปุ่ม)
                     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-                    qty_ord = r3c1.number_input("สั่งมา (ชิ้น)", min_value=0, step=1)
-                    qty_rem = r3c2.number_input("เหลือ (Stock)", min_value=0, step=1, value=qty_ord)
-                    yuan_rate = r3c3.number_input("เรทหยวน", value=5.00, format="%.2f")
-                    fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, format="%.2f")
+                    qty_ord = r3c1.number_input("สั่งมา (ชิ้น) *", min_value=0, step=0) 
+                    qty_rem = r3c2.number_input("เหลือ (Stock) *", min_value=0, step=0, value=qty_ord)
+                    yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=5.00)
+                    fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f")
                     
-                    # แถว 4: ราคาทุนต่างๆ
+                    # แถว 4
                     r4c1, r4c2, r4c3 = st.columns(3)
-                    p_no_vat = r4c1.number_input("ราคา/ชิ้น (ไม่ VAT)", format="%.2f")
-                    p_1688_noship = r4c2.number_input("1688/ชิ้น (ไม่ส่ง)", format="%.2f")
-                    p_1688_ship = r4c3.number_input("1688/ชิ้น (รวมส่ง)", format="%.2f")
+                    p_no_vat = r4c1.number_input("ราคา/ชิ้น (ไม่ VAT)", min_value=0.0, step=0.0, format="%.2f")
+                    p_1688_noship = r4c2.number_input("1688/ชิ้น (ไม่ส่ง)", min_value=0.0, step=0.0, format="%.2f")
+                    p_1688_ship = r4c3.number_input("1688/ชิ้น (รวมส่ง) *", min_value=0.0, step=0.0, format="%.2f")
 
                     st.markdown("###### 🏷️ ราคาขาย & สรุป")
-                    # แถว 5: ราคาขาย และ ขนส่ง
+                    # แถว 5
                     r5c1, r5c2, r5c3 = st.columns(3)
-                    p_shopee = r5c1.number_input("Shopee (บาท)", format="%.2f")
-                    p_tiktok = r5c2.number_input("TikTok (บาท)", format="%.2f")
+                    p_shopee = r5c1.number_input("Shopee (บาท)", min_value=0.0, step=0.0, format="%.2f")
+                    p_tiktok = r5c2.number_input("TikTok (บาท)", min_value=0.0, step=0.0, format="%.2f")
                     transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"])
 
-                    # แถว 6: ยอดรวม (Highlight)
-                    total_yuan_calc = qty_ord * p_1688_ship
-                    
                     st.markdown("---")
+                    
+                    # ส่วนคำนวณยอดรวม (แก้ไขได้)
+                    calc_guide = qty_ord * p_1688_ship
+                    
                     f_col1, f_col2 = st.columns([2, 1])
                     with f_col1:
-                        st.markdown(f"#### รวมยอดหยวน: :green[{total_yuan_calc:,.2f} ¥]")
+                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f} (คุณแก้ตัวเลขด้านล่างได้)")
+                        total_yuan_input = st.number_input("ยอดรวมหยวน (¥) *", min_value=0.0, step=0.0, format="%.2f", value=float(calc_guide))
+                        
                     with f_col2:
-                        # ปุ่มบันทึก สีเขียว (ใช้ type=primary)
+                        st.write("")
+                        st.write("")
                         submitted = st.form_submit_button("✅ บันทึกข้อมูล", type="primary", use_container_width=True)
 
                     if submitted:
-                        if not master_pid:
-                            st.error("กรุณาเลือกสินค้าก่อน")
-                        elif not po_num:
-                            st.error("กรุณากรอกเลข PO")
+                        # Validation
+                        errors = []
+                        if not master_pid: errors.append("ยังไม่ได้เลือกสินค้า")
+                        if not po_num: errors.append("ยังไม่ได้ระบุเลข PO")
+                        if qty_ord <= 0: errors.append("จำนวนสั่งซื้อต้องมากกว่า 0")
+                        if p_1688_ship <= 0: errors.append("ราคาต้นทุนรวมส่งต้องมากกว่า 0")
+                        if total_yuan_input <= 0: errors.append("ยอดรวมหยวนต้องมากกว่า 0")
+                        
+                        if errors:
+                            st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                         else:
-                            # เตรียมข้อมูล Save
                             new_row = [
                                 master_pid, po_num, order_date, recv_date, weight_txt,
                                 qty_ord, qty_rem, yuan_rate, p_no_vat,
-                                p_1688_noship, p_1688_ship, total_yuan_calc,
+                                p_1688_noship, p_1688_ship, total_yuan_input,
                                 p_shopee, p_tiktok, fees, transport
                             ]
-                            
                             if save_po_to_sheet(new_row):
-                                st.success("บันทึกสำเร็จ!")
+                                st.success("บันทึกข้อมูลเรียบร้อย!")
                                 st.rerun()
 
     # --- UI Main Tab 2 ---
@@ -347,15 +362,22 @@ with tab2:
             add_po_dialog()
 
     if not df_po_display.empty:
-        # จัดเรียงคอลัมน์ให้สวยงาม
+        # [CRITICAL FIX] Data Type Conversion 
+        # ต้องแปลงข้อมูลให้เป็นตัวเลขจริงๆ ก่อนส่งเข้า data_editor ไม่งั้นจะ Error แบบที่คุณเจอ
+        numeric_cols = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price"]
+        
+        for col in numeric_cols:
+            if col in df_po_display.columns:
+                # แปลง Text เป็นตัวเลข (ถ้า Error ให้เป็น 0)
+                df_po_display[col] = pd.to_numeric(df_po_display[col], errors='coerce').fillna(0)
+
+        # เลือกคอลัมน์ที่จะแสดง
         display_cols = [
             "Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date",
             "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate",
             "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price",
             "Transport_Type"
         ]
-        
-        # ตรวจสอบว่ามีคอลัมน์ครบไหมก่อนแสดง (ป้องกัน Error)
         cols_to_show = [c for c in display_cols if c in df_po_display.columns]
 
         st.data_editor(
@@ -366,9 +388,9 @@ with tab2:
                 "PO_Number": st.column_config.TextColumn("เลข PO", width="small"),
                 "Order_Date": st.column_config.TextColumn("วันที่สั่ง"),
                 "Received_Date": st.column_config.TextColumn("ของมา"),
-                "Transport_Weight": st.column_config.TextColumn("รายละเอียด/น้ำหนัก", width="large"),
-                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา"),
-                "Qty_Remaining": st.column_config.NumberColumn("เหลือ"),
+                "Transport_Weight": st.column_config.TextColumn("รายละเอียด", width="large"),
+                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
                 "Yuan_Rate": st.column_config.NumberColumn("เรท", format="%.2f"),
                 "Price_1688_WithShip": st.column_config.NumberColumn("ต้นทุน(รวมส่ง)", format="%.2f"),
                 "Total_Yuan": st.column_config.NumberColumn("รวมหยวน", format="%.2f ¥"),
@@ -377,7 +399,7 @@ with tab2:
             height=700,
             use_container_width=True,
             hide_index=True,
-            disabled=True # ไม่ให้แก้ข้อมูลในตารางโดยตรง (ให้แก้ผ่าน Sheet เพื่อความชัวร์)
+            disabled=True # แก้ไขผ่าน Sheet ปลอดภัยกว่า
         )
     else:
         st.info("ยังไม่มีข้อมูลใบสั่งซื้อ กดปุ่ม 'เพิ่ม PO ใหม่' เพื่อเริ่มใช้งาน")
