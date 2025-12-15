@@ -57,7 +57,7 @@ st.markdown("""
 # กรุณาตรวจสอบ ID ให้ถูกต้อง
 MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
 TAB_NAME_STOCK = "MASTER"
-TAB_NAME_PO = "PO_DATA" # ต้องมี Tab นี้ใน Google Sheet
+TAB_NAME_PO = "PO_DATA" # ต้องมี Tab นี้ใน Google Sheet (Header ต้องตรงตามที่ใช้)
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 
 @st.cache_resource
@@ -96,6 +96,7 @@ def get_po_data():
         try:
             ws = sh.worksheet(TAB_NAME_PO)
             data = ws.get_all_records()
+            # ถ้าไม่มีข้อมูล หรือ Tab ว่าง ให้คืนค่า DataFrame ว่างพร้อมชื่อคอลัมน์
             if not data:
                  return pd.DataFrame(columns=["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
                                          "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
@@ -194,7 +195,7 @@ with tab1:
     
     if not df_master.empty and not df_sale.empty:
         sold_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
-        sold_summary['Product_ID'] = sold_summary['Product_ID'].astype(str) # กันเหนียว
+        sold_summary['Product_ID'] = sold_summary['Product_ID'].astype(str)
         
         merged = pd.merge(df_master, sold_summary, on='Product_ID', how='left')
         merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
@@ -244,7 +245,7 @@ with tab1:
 # TAB 2: Purchase Orders (ระบบใหม่ + แก้บั๊ก)
 # ==========================================
 with tab2:
-    # --- Function: Popup Modal (Final Version) ---
+    # --- Function: Popup Modal ---
     @st.dialog("📝 บันทึกรายการสั่งซื้อ (New PO)", width="large")
     def add_po_dialog():
         # --- ส่วนที่ 1: ค้นหาสินค้า ---
@@ -362,14 +363,28 @@ with tab2:
             add_po_dialog()
 
     if not df_po_display.empty:
-        # [CRITICAL FIX] Data Type Conversion 
-        # ต้องแปลงข้อมูลให้เป็นตัวเลขจริงๆ ก่อนส่งเข้า data_editor ไม่งั้นจะ Error แบบที่คุณเจอ
-        numeric_cols = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price"]
+        # ------------------------------------------------------------------
+        # [CRITICAL FIX] Data Type Cleaning
+        # ------------------------------------------------------------------
         
+        # 1. จัดการรูปภาพ (ถ้าไม่มีรูปจากการ Merge จะเป็น NaN -> เปลี่ยนเป็น "")
+        if "Image" in df_po_display.columns:
+            df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
+
+        # 2. จัดการข้อมูล Text และ Date (บังคับเป็น String เพื่อกัน Object error)
+        text_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Transport_Type"]
+        for col in text_cols:
+            if col in df_po_display.columns:
+                df_po_display[col] = df_po_display[col].astype(str).replace("nan", "")
+
+        # 3. จัดการข้อมูลตัวเลข (บังคับเป็น float)
+        numeric_cols = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price"]
         for col in numeric_cols:
             if col in df_po_display.columns:
-                # แปลง Text เป็นตัวเลข (ถ้า Error ให้เป็น 0)
+                # แปลงเป็นตัวเลข หาก error ให้เป็น NaN แล้วแทนที่ด้วย 0
                 df_po_display[col] = pd.to_numeric(df_po_display[col], errors='coerce').fillna(0)
+                # Cast เป็น float ชัดเจนเพื่อให้ NumberColumn ทำงานได้
+                df_po_display[col] = df_po_display[col].astype(float)
 
         # เลือกคอลัมน์ที่จะแสดง
         display_cols = [
@@ -399,7 +414,7 @@ with tab2:
             height=700,
             use_container_width=True,
             hide_index=True,
-            disabled=True # แก้ไขผ่าน Sheet ปลอดภัยกว่า
+            disabled=True 
         )
     else:
         st.info("ยังไม่มีข้อมูลใบสั่งซื้อ กดปุ่ม 'เพิ่ม PO ใหม่' เพื่อเริ่มใช้งาน")
