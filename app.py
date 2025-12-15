@@ -8,200 +8,139 @@ from googleapiclient.http import MediaIoBaseDownload
 import gspread
 
 # ==========================================
-# 1. ตั้งค่าและเตรียมตัวแปร
+# 1. ตั้งค่า ID (ถูกต้องตามรูปภาพของคุณ)
 # ==========================================
-st.set_page_config(page_title="JST Smart Dashboard", layout="wide")
+st.set_page_config(page_title="JST Hybrid Dashboard", layout="wide")
 
-# ใส่ ID โฟลเดอร์ของคุณตรงนี้
+# Stock: ใช้ Master Sheet ID (จากรูปที่ 1)
+MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
+TAB_NAME_STOCK = "MASTER"  # ชื่อแท็บในรูปที่ 1
+
+# Sale: ใช้ Folder ID (จากรูปที่ 3)
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
-FOLDER_ID_DATA_STOCK = "1-hXu2RG2gNKMkW3ZFBFfhjQEhTacVYzk"
 
 # ==========================================
-# 2. ฟังก์ชันเชื่อมต่อ Google Cloud (Drive & Sheets)
+# 2. เชื่อมต่อ Google Cloud
 # ==========================================
 @st.cache_resource
 def get_credentials():
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     if "gcp_service_account" in st.secrets:
-        secret_value = st.secrets["gcp_service_account"]
-        # แปลง String เป็น Dict ถ้าจำเป็น
-        if isinstance(secret_value, str):
-            creds_dict = json.loads(secret_value)
-        else:
-            creds_dict = dict(secret_value)
-            
-        # แก้ปัญหา \n ใน Private Key
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            
+        creds_dict = json.loads(st.secrets["gcp_service_account"]) if isinstance(st.secrets["gcp_service_account"], str) else dict(st.secrets["gcp_service_account"])
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         return service_account.Credentials.from_service_account_info(creds_dict, scopes=scope)
-    else:
-        # กรณีรันในเครื่อง
-        return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
+    return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
 # ==========================================
-# 3. ฟังก์ชันค้นหาและดาวน์โหลดไฟล์จากโฟลเดอร์
+# 3. ฟังก์ชันดึงข้อมูล (Hybrid)
 # ==========================================
-def get_latest_dataframe_from_folder(folder_id, file_type="stock"):
-    creds = get_credentials()
-    service = build('drive', 'v3', credentials=creds)
-    
+def get_stock_from_sheet():
+    """ดึงสต็อกสินค้าจาก Google Sheet (Master)"""
     try:
-        # 1. ค้นหาไฟล์ในโฟลเดอร์ (เรียงตามเวลาแก้ไขล่าสุด)
-        query = f"'{folder_id}' in parents and trashed=false"
-        results = service.files().list(
-            q=query,
-            orderBy='modifiedTime desc', # เอาไฟล์ใหม่สุดขึ้นก่อน
-            pageSize=1, 
-            fields="files(id, name, mimeType)"
-        ).execute()
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_STOCK)
+        df = pd.DataFrame(ws.get_all_records())
         
+        # แปลงชื่อคอลัมน์ (ตามรูปที่ 1)
+        col_map = {'รูปภาพ':'Image', 'รหัสสินค้า':'Product_ID', 'ชื่อสินค้า':'Product_Name', 'สินค้าคงคลัง':'Initial_Stock'}
+        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
+        
+        # แปลงตัวเลข
+        if 'Initial_Stock' in df.columns:
+            df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+            
+        return df
+    except Exception as e:
+        st.error(f"❌ อ่าน Master Sheet ไม่สำเร็จ: {e}")
+        return pd.DataFrame()
+
+def get_sale_from_folder():
+    """ดึงยอดขายจากไฟล์ Excel ล่าสุดใน Drive Folder"""
+    try:
+        creds = get_credentials()
+        service = build('drive', 'v3', credentials=creds)
+        
+        # หาไฟล์ล่าสุดในโฟลเดอร์ Sale
+        results = service.files().list(
+            q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false",
+            orderBy='modifiedTime desc', pageSize=1, fields="files(id, name)").execute()
         items = results.get('files', [])
         
-        if not items:
-            st.warning(f"📂 ไม่พบไฟล์ในโฟลเดอร์ ID: {folder_id}")
-            return pd.DataFrame()
-            
-        latest_file = items[0]
-        file_id = latest_file['id']
-        file_name = latest_file['name']
-        mime_type = latest_file['mimeType']
+        if not items: return pd.DataFrame()
         
-        # แสดงชื่อไฟล์ที่กำลังใช้งาน
-        st.toast(f"กำลังอ่านไฟล์: {file_name}", icon="📄")
+        # ดาวน์โหลด
+        file_id = items[0]['id']
+        request = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False: status, done = downloader.next_chunk()
+        fh.seek(0)
         
-        # 2. กรณีเป็น Google Sheet -> ใช้ gspread อ่าน
-        if mime_type == 'application/vnd.google-apps.spreadsheet':
-            gc = gspread.authorize(creds)
-            sh = gc.open_by_key(file_id)
-            worksheet = sh.get_worksheet(0) # อ่านชีทแรก
-            data = worksheet.get_all_records()
-            df = pd.DataFrame(data)
+        df = pd.read_excel(fh)
+        
+        # แปลงชื่อคอลัมน์ (ปรับตามไฟล์ JST 12.12)
+        col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
+        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
+        
+        if 'Qty_Sold' in df.columns:
+            df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
             
-        # 3. กรณีเป็น Excel (xlsx) หรือ CSV -> ดาวน์โหลดแล้วอ่านด้วย Pandas
-        else:
-            request = service.files().get_media(fileId=file_id)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while done is False:
-                status, done = downloader.next_chunk()
-            
-            fh.seek(0)
-            if 'csv' in file_name.lower():
-                df = pd.read_csv(fh)
-            else:
-                df = pd.read_excel(fh)
-
-        # 4. แปลงหัวตาราง (Mapping)
-        if file_type == 'stock':
-            # แปลงชื่อไทย -> อังกฤษ (Stock)
-            cols_map = {'รูปภาพ':'Image', 'รหัสสินค้า':'Product_ID', 'ชื่อสินค้า':'Product_Name', 'สินค้าคงคลัง':'Initial_Stock'}
-            # กรองเฉพาะคอลัมน์ที่มี
-            df = df.rename(columns={k:v for k,v in cols_map.items() if k in df.columns})
-            # แปลงตัวเลข
-            if 'Initial_Stock' in df.columns:
-                df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0)
-                
-        elif file_type == 'sale':
-            # แปลงชื่อไทย -> อังกฤษ (Sale)
-            cols_map = {'เวลาสั่งซื้อ':'Order_Time', 'ร้านค้า':'Shop', 'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold'}
-            df = df.rename(columns={k:v for k,v in cols_map.items() if k in df.columns})
-            # แปลงวันที่และตัวเลข
-            if 'Order_Time' in df.columns:
-                df['Order_Time'] = pd.to_datetime(df['Order_Time'], errors='coerce')
-                df['Date'] = df['Order_Time'].dt.date
-            if 'Qty_Sold' in df.columns:
-                df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
-                
         return df
-        
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
+        st.error(f"❌ อ่านไฟล์ Excel Sale ไม่สำเร็จ: {e}")
         return pd.DataFrame()
 
 # ==========================================
-# 4. ส่วนแสดงผล Dashboard
+# 4. แสดงผล Dashboard
 # ==========================================
-st.title("📊 JST Auto-Sync Dashboard")
-st.caption("ระบบจะดึงไฟล์ที่ **ใหม่ที่สุด** ในโฟลเดอร์ Google Drive มาแสดงผลอัตโนมัติ")
+st.title("📊 JST Hybrid Dashboard")
 
-with st.spinner('กำลังสแกนหาไฟล์ล่าสุดใน Drive...'):
-    df_stock = get_latest_dataframe_from_folder(FOLDER_ID_DATA_STOCK, "stock")
-    df_sale = get_latest_dataframe_from_folder(FOLDER_ID_DATA_SALE, "sale")
+if st.button("🔄 อัปเดตข้อมูล"):
+    st.cache_data.clear()
+
+with st.spinner('กำลังรวมข้อมูล Stock (Sheet) และ Sale (Excel)...'):
+    df_stock = get_stock_from_sheet()
+    df_sale = get_sale_from_folder()
 
 if not df_stock.empty and not df_sale.empty:
-    
-    # --- ประมวลผลข้อมูล ---
-    # รวมยอดขายตามรหัสสินค้า
+    # รวมข้อมูล
     sold_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
-    
-    # เชื่อมตาราง Stock + Sale
     merged = pd.merge(df_stock, sold_summary, on='Product_ID', how='left')
     merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
     merged['Current_Stock'] = merged['Initial_Stock'] - merged['Qty_Sold']
     
-    # สร้างสถานะแจ้งเตือน
+    # กำหนดสถานะ
     def get_status(val):
         if val <= 0: return "🔴 หมดเกลี้ยง"
         elif val < 10: return "⚠️ ใกล้หมด"
         else: return "🟢 มีของ"
     merged['Status'] = merged['Current_Stock'].apply(get_status)
 
-    # --- แสดงผล Metric ---
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📦 รายการสินค้า (Stock)", f"{len(merged)} รายการ")
-    c2.metric("💰 ขายออกไปแล้ว (Sale)", f"{int(df_sale['Qty_Sold'].sum())} ชิ้น")
+    # Metric
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📦 สินค้าทั้งหมด", f"{len(merged)} รายการ")
+    c2.metric("💰 ขายไปแล้ว", f"{int(merged['Qty_Sold'].sum())} ชิ้น")
     c3.metric("⚠️ ต้องเติมของ", f"{len(merged[merged['Current_Stock'] < 10])} รายการ")
-    c4.metric("🏪 ร้านค้าที่ขาย", f"{df_sale['Shop'].nunique() if 'Shop' in df_sale.columns else 0} ร้าน")
-
-    st.divider()
-
-    # --- แสดงตารางและกราฟ ---
-    tab1, tab2 = st.tabs(["📉 วิเคราะห์ยอดขาย", "📦 เช็คสต็อกคงเหลือ"])
     
-    with tab1:
-        col1, col2 = st.columns([2,1])
-        with col1:
-            if 'Date' in df_sale.columns:
-                st.subheader("ยอดขายรายวัน")
-                daily = df_sale.groupby('Date')['Qty_Sold'].sum().reset_index()
-                st.bar_chart(daily.set_index('Date'))
-        with col2:
-            if 'Shop' in df_sale.columns:
-                st.subheader("สัดส่วนร้านค้า")
-                # แสดงเป็นตารางง่ายๆ หรือใช้ plotly ถ้า import มา
-                shop_summ = df_sale.groupby('Shop')['Qty_Sold'].sum().reset_index()
-                st.dataframe(shop_summ, hide_index=True, use_container_width=True)
-                
-        st.subheader("รายการขายล่าสุด (จากไฟล์ล่าสุด)")
-        st.dataframe(df_sale.head(10), use_container_width=True)
-
-    with tab2:
-        st.subheader("สถานะสต็อกปัจจุบัน (Stock ล่าสุด - Sale ล่าสุด)")
-        
-        status_filter = st.multiselect("กรองสถานะ:", ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
-        display_df = merged[merged['Status'].isin(status_filter)]
-        
-        st.data_editor(
-            display_df[['Image', 'Product_ID', 'Product_Name', 'Initial_Stock', 'Qty_Sold', 'Current_Stock', 'Status']],
-            column_config={
-                "Image": st.column_config.ImageColumn("รูปสินค้า"),
-                "Product_ID": "รหัส",
-                "Product_Name": "ชื่อสินค้า",
-                "Initial_Stock": st.column_config.NumberColumn("สต็อกตั้งต้น"),
-                "Qty_Sold": st.column_config.NumberColumn("ขายไป"),
-                "Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max())),
-            },
-            use_container_width=True,
-            height=600,
-            hide_index=True
-        )
-
+    st.divider()
+    
+    # ตารางเช็คสต็อก
+    st.subheader("📦 เช็คสถานะสินค้าล่าสุด")
+    status_filter = st.multiselect("กรองสถานะ", ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
+    show_df = merged[merged['Status'].isin(status_filter)].sort_values(by='Current_Stock')
+    
+    st.data_editor(
+        show_df[['Image', 'Product_ID', 'Product_Name', 'Initial_Stock', 'Qty_Sold', 'Current_Stock', 'Status']],
+        column_config={
+            "Image": st.column_config.ImageColumn("รูป"),
+            "Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max()))
+        },
+        use_container_width=True,
+        height=600,
+        hide_index=True
+    )
 else:
-    st.info("กำลังรอการเชื่อมต่อ... หรือไม่พบไฟล์ในโฟลเดอร์")
-    st.write("คำแนะนำ: โปรดตรวจสอบว่ามีไฟล์ Excel (.xlsx) อยู่ในโฟลเดอร์ DATA STOCK และ DATA SALE บน Google Drive แล้ว")
+    st.warning("⚠️ ข้อมูลยังมาไม่ครบ โปรดตรวจสอบสิทธิ์การเข้าถึงไฟล์")
