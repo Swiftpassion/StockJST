@@ -52,15 +52,16 @@ st.markdown("""
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
     
-    /* Table Headers */
+    /* Table Headers: จัดกึ่งกลาง + รองรับการขึ้นบรรทัดใหม่ */
     [data-testid="stDataFrame"] th { 
         text-align: center !important;
         white-space: pre-wrap !important; 
         vertical-align: middle !important;
         min-height: 60px;
+        font-size: 13px;
     }
 
-    /* Table Cells */
+    /* Table Cells: บังคับตัดคำเป็น ... ถ้าล้น */
     [data-testid="stDataFrame"] td {
         white-space: nowrap;
         overflow: hidden;
@@ -214,7 +215,7 @@ with st.spinner('กำลังโหลดข้อมูล...'):
 tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
-# TAB 1: Stock Report
+# TAB 1: Stock Report (MASTER BASED)
 # ==========================================
 with tab1:
     # --- Function: History Dialog ---
@@ -226,7 +227,6 @@ with tab1:
             st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
             return
 
-        # สร้างตัวเลือกค้นหา
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         selected_product = st.selectbox(
             "🔍 ค้นหาสินค้า (ชื่อ/รหัส)", 
@@ -236,24 +236,19 @@ with tab1:
         )
 
         if selected_product:
-            # ดึง Product ID
             selected_pid = selected_product.split(" : ")[0]
-            
-            # กรองข้อมูลจาก df_po
             history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
             
             if not history_df.empty:
-                # เรียงลำดับจาก ใหม่ -> เก่า (Order_Date Descending)
                 if 'Order_Date' in history_df.columns:
                     history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
                     history_df = history_df.sort_values(by='Order_Date', ascending=False)
-                    # แปลงกลับเป็น String เพื่อแสดงผลสวยๆ
                     history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
 
                 st.divider()
                 st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
                 
-                # แสดงตาราง
+                # [แก้ไข] เปลี่ยนหัวตารางใน Dialog ประวัติให้เป็นภาษาไทย
                 st.dataframe(
                     history_df,
                     column_config={
@@ -262,8 +257,8 @@ with tab1:
                         "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
                         "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
                         "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                        "Price_1688_WithShip": st.column_config.NumberColumn("ต้นทุน(รวมส่ง)", format="%.2f"),
-                        "Transport_Type": st.column_config.TextColumn("ขนส่ง"),
+                        "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f"),
+                        "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
                     },
                     use_container_width=True,
                     hide_index=True,
@@ -272,11 +267,8 @@ with tab1:
             else:
                 st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
 
-    # ----------------------
-    # Main Dashboard Logic
-    # ----------------------
+    # --- Main Logic ---
     if not df_master.empty:
-        # Prepare Data
         df_po_latest = pd.DataFrame()
         if not df_po.empty:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
@@ -321,29 +313,21 @@ with tab1:
             st.cache_data.clear()
             st.rerun()
 
-        # [UPDATED] เพิ่มปุ่มดูประวัติใน Layout (5 Columns)
         col_f1, col_f2, col_b1, col_b2, col_b3 = st.columns([2, 2, 0.4, 0.5, 0.5])
-        
         with col_f1:
             selected_status = st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], key="filter_status")
         with col_f2:
             search_text = st.text_input("ค้นหา (ชื่อ/รหัส)", key="search_query", placeholder="เช่น ชั้นวางของ, SP001...")
         
-        # ปุ่มล้าง
         with col_b1:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("❌ ล้าง", on_click=clear_filters, help="ล้างตัวกรอง")
-        
-        # ปุ่มดูประวัติ (ใหม่)
+            st.button("❌ ล้าง", on_click=clear_filters)
         with col_b2:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            if st.button("📜 ดูประวัติ", type="secondary", help="ดูประวัติการสั่งซื้อย้อนหลัง"):
-                show_history_dialog()
-
-        # ปุ่มอัปเดต
+            if st.button("📜 ดูประวัติ", type="secondary"): show_history_dialog()
         with col_b3:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("🔄 อัปเดต", on_click=manual_update, type="primary", help="โหลดข้อมูลใหม่ล่าสุด")
+            st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
 
         # Table Logic
         show_df = df_stock_report.copy()
@@ -398,12 +382,12 @@ with tab1:
                 "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d", width=COL_WIDTH),
                 "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d", width=COL_WIDTH),
                 "Yuan_Rate": st.column_config.NumberColumn("เรท\nหยวน", format="%.2f", width=COL_WIDTH),
-                "Price_Unit_NoVAT": st.column_config.NumberColumn(label="ราคา/ชิ้น\nไม่รวม VAT", format="%.2f", width=COL_WIDTH),
-                "Price_1688_NoShip": st.column_config.NumberColumn(label="1688/ชิ้น\nไม่รวมส่ง", format="%.2f", width=COL_WIDTH),
-                "Price_1688_WithShip": st.column_config.NumberColumn(label="1688/ชิ้น\nรวมค่าส่ง", format="%.2f", width=COL_WIDTH),
+                "Price_Unit_NoVAT": st.column_config.NumberColumn(label="ราคาต่อชิ้น\nไม่รวม VAT", format="%.2f", width=COL_WIDTH),
+                "Price_1688_NoShip": st.column_config.NumberColumn(label="ราคา1688/1 ชิ้น\nไม่รวมค่าส่ง", format="%.2f", width=COL_WIDTH),
+                "Price_1688_WithShip": st.column_config.NumberColumn(label="ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f", width=COL_WIDTH),
                 "Total_Yuan": st.column_config.NumberColumn(label="ราคาหยวน\nทั้งหมด", format="%.2f ¥", width=COL_WIDTH),
-                "Shopee_Price": st.column_config.NumberColumn(label="ราคา\nShopee", format="%.2f", width=COL_WIDTH),
-                "TikTok_Price": st.column_config.NumberColumn(label="ราคา\nTikTok", format="%.2f", width=COL_WIDTH),
+                "Shopee_Price": st.column_config.NumberColumn(label="ราคาใน\nช้อปปี้", format="%.2f", width=COL_WIDTH),
+                "TikTok_Price": st.column_config.NumberColumn(label="ราคาใน\nTIKTOK", format="%.2f", width=COL_WIDTH),
                 "Fees": st.column_config.NumberColumn(label="ค่า\nธรรมเนียม", format="%.2f", width=COL_WIDTH),
                 "Transport_Type": st.column_config.TextColumn("การขนส่ง", width=COL_WIDTH),
                 "Qty_Sold": st.column_config.NumberColumn("ยอดขาย", format="%d", width=COL_WIDTH),
@@ -594,12 +578,15 @@ with tab2:
         ]
         cols_to_show = [c for c in po_display_cols if c in df_po_display.columns]
 
+        # [แก้ไข] เปลี่ยนหัวตาราง Tab 2 ให้เป็นภาษาไทย (ตาม Tab 1)
         st.data_editor(
             df_po_display[cols_to_show],
             column_config={
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
                 "PO_Number": st.column_config.TextColumn("เลข PO", width=100),
+                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=100), # เปลี่ยนจาก Order_Date
+                "Received_Date": st.column_config.TextColumn("ของมา", width=100), # เปลี่ยนจาก Received_Date
                 "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width=200),
                 "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
                 "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
