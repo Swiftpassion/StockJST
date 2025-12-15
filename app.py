@@ -16,6 +16,12 @@ st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
+    /* ลดพื้นที่ว่างด้านบน Header */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
+    }
+
     /* Card Container */
     .metric-card {
         background-color: #1a1a1a;
@@ -24,22 +30,41 @@ st.markdown("""
         margin-bottom: 20px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
-    .metric-title { color: #b0b0b0; font-size: 14px; font-weight: 500; margin-bottom: 5px; }
-    .metric-value { color: #ffffff; font-size: 28px; font-weight: bold; }
+    .metric-title {
+        color: #b0b0b0;
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 5px;
+    }
+    .metric-value {
+        color: #ffffff;
+        font-size: 28px;
+        font-weight: bold;
+    }
+    
+    /* Border Colors */
+    .border-cyan { border-left: 4px solid #00e5ff; }
+    .border-gold { border-left: 4px solid #ffd700; }
+    .border-red  { border-left: 4px solid #ff4d4d; }
+    
+    /* Text Colors for Values (ใช้ !important เพื่อบังคับสี) */
+    .text-cyan { color: #00e5ff !important; }
+    .text-gold { color: #ffd700 !important; }
+    .text-red  { color: #ff4d4d !important; }
     
     /* Table Headers Center */
     [data-testid="stDataFrame"] th { text-align: center !important; }
     
-    /* Button Full Width */
+    /* Button Full Width & Height Adjustment */
     .stButton button { width: 100%; }
-
-    /* --- CSS HACK: ซ่อนปุ่ม +/- ของ Number Input --- */
+    
+    /* ซ่อนปุ่ม +/- ของ Number Input */
     button[data-testid="stNumberInputStepDown"],
     button[data-testid="stNumberInputStepUp"] {
         display: none !important;
     }
     div[data-testid="stNumberInput"] input {
-        text-align: left; /* จัดตัวเลขชิดซ้ายให้พิมพ์ง่าย */
+        text-align: left;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -49,7 +74,7 @@ st.markdown("""
 # ==========================================
 MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
 TAB_NAME_STOCK = "MASTER"
-TAB_NAME_PO = "PO_DATA" # ต้องมี Tab นี้ใน Google Sheet
+TAB_NAME_PO = "PO_DATA"
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 
 @st.cache_resource
@@ -97,10 +122,7 @@ def get_po_data():
             if not data:
                  return pd.DataFrame(columns=columns)
             df = pd.DataFrame(data)
-            
-            # [Trick] สร้าง Column เก็บเลขบรรทัดจริงใน Sheet เพื่อใช้ตอนแก้ไข (Row 2 คือ Data เริ่มต้น)
             df['Sheet_Row_Index'] = range(2, len(df) + 2) 
-            
             return df
         except gspread.WorksheetNotFound:
             return pd.DataFrame()
@@ -167,74 +189,229 @@ def get_sale_from_folder():
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
+# โหลดข้อมูล (ใช้ Cache เพื่อความเร็ว)
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
     
+    # รวมข้อมูลหลัก (Base on PO เป็นหลักตามตารางที่ขอ)
     if not df_po.empty and not df_master.empty:
         df_po['Product_ID'] = df_po['Product_ID'].astype(str)
         df_master['Product_ID'] = df_master['Product_ID'].astype(str)
-        df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image', 'Product_Name']], on='Product_ID', how='left')
+        
+        # Merge PO + Master (เอาชื่อกับรูป)
+        df_merged = pd.merge(df_po, df_master[['Product_ID', 'Image', 'Product_Name']], on='Product_ID', how='left')
     else:
-        df_po_display = df_po.copy()
+        df_merged = df_po.copy()
 
 tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
-# TAB 1: Dashboard
+# TAB 1: Dashboard (Stock Report)
 # ==========================================
 with tab1:
     df_sale = get_sale_from_folder()
-    if not df_master.empty and not df_sale.empty:
-        sold_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
-        sold_summary['Product_ID'] = sold_summary['Product_ID'].astype(str)
-        merged = pd.merge(df_master, sold_summary, on='Product_ID', how='left')
-        merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
-        merged['Current_Stock'] = merged['Initial_Stock'] - merged['Qty_Sold']
-        merged['Status'] = merged['Current_Stock'].apply(lambda x: "🔴 หมดเกลี้ยง" if x <= 0 else ("⚠️ ใกล้หมด" if x < 10 else "🟢 มีของ"))
+    
+    if not df_merged.empty:
+        # เตรียมข้อมูล Sales Summary
+        sales_map = {}
+        if not df_sale.empty:
+            sales_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
+            sales_summary['Product_ID'] = sales_summary['Product_ID'].astype(str)
+            sales_map = sales_summary.set_index('Product_ID')['Qty_Sold'].to_dict()
+        
+        # Map ข้อมูลยอดขายลงใน df_merged
+        df_merged['Qty_Sold'] = df_merged['Product_ID'].map(sales_map).fillna(0)
+        
+        # คำนวณสถานะ
+        # Logic: ดูจาก "เหลือ" (Qty_Remaining) ที่บันทึกใน PO เป็นหลัก
+        # แปลงข้อมูลเป็นตัวเลข
+        numeric_cols = ["Qty_Ordered", "Qty_Remaining", "Qty_Sold"]
+        for col in numeric_cols:
+            df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
+
+        # กำหนด Status
+        def get_status(val):
+            if val <= 0: return "🔴 หมดเกลี้ยง"
+            elif val < 10: return "⚠️ ใกล้หมด"
+            else: return "🟢 มีของ"
+        df_merged['Status'] = df_merged['Qty_Remaining'].apply(get_status)
+
+        # ----------------------
+        # 1. Metrics Cards
+        # ----------------------
+        total_items = len(df_merged) # จำนวนรายการ PO
+        total_sold_all = df_merged['Qty_Sold'].sum() # ยอดขายรวม (อาจซ้ำถ้า Product ID เดียวกันมีหลาย PO แต่นี่คือ data ที่มี)
+        # ถ้านับยอดขายจริงควรนับจาก df_sale โดยตรง
+        real_total_sold = df_sale['Qty_Sold'].sum() if not df_sale.empty else 0
+        
+        critical_stock = len(df_merged[df_merged['Qty_Remaining'] < 10])
 
         c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f"""<div class="metric-card border-cyan"><div class="metric-title">สินค้าทั้งหมด</div><div class="metric-value text-cyan">{len(merged):,}</div></div>""", unsafe_allow_html=True)
-        with c2: st.markdown(f"""<div class="metric-card border-gold"><div class="metric-title">ขายไปแล้ว</div><div class="metric-value text-gold">{int(merged['Qty_Sold'].sum()):,}</div></div>""", unsafe_allow_html=True)
-        with c3: st.markdown(f"""<div class="metric-card border-red"><div class="metric-title">ต้องเติมของ</div><div class="metric-value text-red">{len(merged[merged['Current_Stock'] < 10]):,}</div></div>""", unsafe_allow_html=True)
+        with c1:
+            st.markdown(f"""
+            <div class="metric-card border-cyan">
+                <div class="metric-title">รายการในระบบ (PO)</div>
+                <div class="metric-value text-cyan">{total_items:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div class="metric-card border-gold">
+                <div class="metric-title">ยอดขายรวม (ชิ้น)</div>
+                <div class="metric-value text-gold">{int(real_total_sold):,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"""
+            <div class="metric-card border-red">
+                <div class="metric-title">ต้องเติมของ (รายการ)</div>
+                <div class="metric-value text-red">{critical_stock:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
         
         st.divider()
-        col_filter, col_search = st.columns([1, 1])
-        with col_filter: status_filter = st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
-        with col_search: search_txt = st.text_input("ค้นหาสินค้า", placeholder="พิมพ์ชื่อหรือรหัส...")
         
-        show_df = merged.copy()
-        if "📦 สินค้าทั้งหมด" not in status_filter and status_filter: show_df = show_df[show_df['Status'].isin(status_filter)]
-        if search_txt: show_df = show_df[show_df['Product_Name'].str.contains(search_txt, case=False, na=False) | show_df['Product_ID'].str.contains(search_txt, case=False, na=False)]
+        # ----------------------
+        # 2. Filters & Actions
+        # ----------------------
+        # State สำหรับปุ่ม Clear
+        if 'filter_status' not in st.session_state: st.session_state.filter_status = []
+        if 'search_query' not in st.session_state: st.session_state.search_query = ""
 
-        st.data_editor(show_df[['Image', 'Product_ID', 'Product_Name', 'Current_Stock', 'Status']], column_config={"Image": st.column_config.ImageColumn("รูปสินค้า", width="medium"),"Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max()) if len(merged)>0 else 100)}, use_container_width=True, height=600, hide_index=True)
+        def clear_filters():
+            st.session_state.filter_status = []
+            st.session_state.search_query = ""
+            
+        def manual_update():
+            st.cache_data.clear()
+            st.rerun()
+
+        # Layout: Filter(2) | Search(2) | Clear(0.5) | Update(0.5)
+        col_f1, col_f2, col_btn1, col_btn2 = st.columns([2, 2, 0.5, 0.5])
+        
+        with col_f1:
+            selected_status = st.multiselect(
+                "กรองสถานะ",
+                ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"],
+                key="filter_status"
+            )
+        
+        with col_f2:
+            search_text = st.text_input("ค้นหา (ชื่อ/รหัส/PO)", key="search_query", placeholder="พิมพ์คำค้นหา...")
+
+        with col_btn1:
+            st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            st.button("❌ ล้าง", on_click=clear_filters)
+            
+        with col_btn2:
+            st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
+
+        # ----------------------
+        # 3. Data Filtering
+        # ----------------------
+        show_df = df_merged.copy()
+        
+        # Filter by Status
+        if selected_status:
+            show_df = show_df[show_df['Status'].isin(selected_status)]
+            
+        # Filter by Search Text
+        if search_text:
+            mask = (
+                show_df['Product_Name'].str.contains(search_text, case=False, na=False) |
+                show_df['Product_ID'].str.contains(search_text, case=False, na=False) |
+                show_df['PO_Number'].str.contains(search_text, case=False, na=False)
+            )
+            show_df = show_df[mask]
+
+        # ----------------------
+        # 4. Table Display
+        # ----------------------
+        # จัดเรียงคอลัมน์ตามที่ขอ
+        # รูปสินค้า | รหัสสินค้า | Product_Name | เลข PO | วันที่สั่ง | ของมา | น้ำหนักขนส่ง | สั่งมา | เหลือ | เรทหยวน | ...ราคา... | การขนส่ง | ยอดขาย | คงเหลือ | Status
+        
+        # สร้างคอลัมน์ "คงเหลือ" (ถ้าความหมายคือ Remaining ก็ใช้ Qty_Remaining ซ้ำ หรือคำนวณใหม่ถ้ามี Logic อื่น)
+        # ในที่นี้ใช้ Qty_Remaining (จาก PO) เป็นหลัก
+        
+        # เลือกและเปลี่ยนชื่อคอลัมน์สำหรับแสดงผล (Mapping)
+        display_columns = [
+            "Image", "Product_ID", "Product_Name", "PO_Number", "Order_Date", "Received_Date", 
+            "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", 
+            "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan",
+            "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Qty_Sold", "Status"
+        ]
+        
+        # ตรวจสอบว่าคอลัมน์มีครบไหม
+        final_cols = [c for c in display_columns if c in show_df.columns]
+        show_df_final = show_df[final_cols].copy()
+
+        # Data Cleaning for Display
+        if "Image" in show_df_final.columns:
+            show_df_final["Image"] = show_df_final["Image"].fillna("").astype(str)
+        
+        # จัดการสีแดงเมื่อติดลบ (Using Pandas Styler)
+        # ฟังก์ชันสำหรับทำสี
+        def color_negative_red(val):
+            try:
+                color = '#ff4d4d' if float(val) < 0 else 'white'
+            except:
+                color = 'white'
+            return f'color: {color}'
+
+        # ใช้ st.dataframe แทน data_editor เพื่อรองรับ Styler ได้ดีกว่าในโหมด Read-only
+        st.dataframe(
+            show_df_final.style.map(color_negative_red, subset=['Qty_Remaining']),
+            column_config={
+                "Image": st.column_config.ImageColumn("รูปสินค้า", width="small"),
+                "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
+                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width="medium"),
+                "PO_Number": st.column_config.TextColumn("เลข PO"),
+                "Order_Date": st.column_config.TextColumn("วันที่สั่ง"),
+                "Received_Date": st.column_config.TextColumn("ของมา"),
+                "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
+                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                "Yuan_Rate": st.column_config.NumberColumn("เรทหยวน", format="%.2f"),
+                "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคาต่อชิ้นไม่รวม VAT", format="%.2f"),
+                "Price_1688_NoShip": st.column_config.NumberColumn("ราคา1688/1 ชิ้น ไม่รวมค่าส่ง", format="%.2f"),
+                "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น รวมค่าส่ง", format="%.2f"),
+                "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
+                "Shopee_Price": st.column_config.NumberColumn("ราคาในช้อปปี้", format="%.2f"),
+                "TikTok_Price": st.column_config.NumberColumn("ราคาใน TIKTOK", format="%.2f"),
+                "Fees": st.column_config.NumberColumn("ค่าธรรมเนียม", format="%.2f"),
+                "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
+                "Qty_Sold": st.column_config.NumberColumn("ยอดขาย", format="%d"),
+                "Status": st.column_config.TextColumn("Status"),
+            },
+            height=800,
+            use_container_width=True,
+            hide_index=True
+        )
 
 # ==========================================
-# TAB 2: Purchase Orders
+# TAB 2: Purchase Orders (คงเดิมตามคำสั่ง)
 # ==========================================
 with tab2:
     @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
     def po_form_dialog(mode="add"):
-        # ตัวแปรสำหรับเก็บข้อมูลที่จะใช้ในฟอร์ม
         d = {}
         sheet_row_index = None
         
-        # ----------------------------------------------------
-        # ส่วนค้นหา
-        # ----------------------------------------------------
         if mode == "search":
             st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
-            if not df_po_display.empty:
-                po_choices = df_po_display.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
+            if not df_merged.empty: # ใช้ df_merged แทน df_po_display เดิมได้เลยเพราะโครงสร้างเหมือนกัน
+                po_choices = df_merged.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
                 selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
                 
                 if selected_po_str:
                     sel_po = selected_po_str.split(" (")[0]
                     sel_pid = selected_po_str.split(" (")[1].replace(")", "")
                     
-                    found_row = df_po_display[
-                        (df_po_display['PO_Number'] == sel_po) & 
-                        (df_po_display['Product_ID'] == sel_pid)
+                    found_row = df_merged[
+                        (df_merged['PO_Number'] == sel_po) & 
+                        (df_merged['Product_ID'] == sel_pid)
                     ]
                     
                     if not found_row.empty:
@@ -243,7 +420,7 @@ with tab2:
                         st.success(f"พบข้อมูล PO: {sel_po}")
                         st.divider()
                     else:
-                        st.error("ไม่พบข้อมูล (อาจมีข้อผิดพลาดในการดึงข้อมูล)")
+                        st.error("ไม่พบข้อมูล")
                         return
                 else:
                     st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
@@ -252,9 +429,6 @@ with tab2:
                 st.warning("ยังไม่มีข้อมูล PO ในระบบ")
                 return
 
-        # ----------------------------------------------------
-        # ส่วนฟอร์ม
-        # ----------------------------------------------------
         form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
         st.markdown(f"#### {form_title}")
 
@@ -315,7 +489,6 @@ with tab2:
                         v = d.get(key)
                         return float(v) if v and str(v) != "nan" and float(v) != 0 else default
 
-                    # [FIXED] Changed min_value=0 to 0.0, step=0 to 0.0 to match Float type
                     qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=val_num("Qty_Ordered"), placeholder="0") 
                     qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=val_num("Qty_Remaining"), placeholder="0")
                     yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Yuan_Rate"), placeholder="0.00")
@@ -340,7 +513,7 @@ with tab2:
                     st.markdown("---")
                     f_col1, f_col2 = st.columns([2, 1])
                     with f_col1:
-                        st.caption(f"💡 ระบบคำนวณอัติโนมัติ ยอดแนะนำ: {calc_guide:,.2f}")
+                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
                         initial_total = val_num("Total_Yuan")
                         if initial_total is None:
                             initial_total = calc_guide if calc_guide > 0 else None
@@ -376,9 +549,8 @@ with tab2:
 
     # --- UI Logic ---
     col_head, col_action = st.columns([4, 2])
-    with col_head: st.subheader("📋 สรุปประวัติรายการสั่งซื้อสินค้า")
+    with col_head: st.subheader("📋 รายการสั่งซื้อสินค้า (PO Log)")
     with col_action:
-        # แบ่งเป็น 2 ปุ่มชัดเจน
         b1, b2 = st.columns(2)
         with b1:
             if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
@@ -387,26 +559,23 @@ with tab2:
             if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): 
                 po_form_dialog(mode="search")
 
-    if not df_po_display.empty:
-        # Data Cleaning
-        if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
-        text_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Transport_Type"]
-        for col in text_cols:
-            if col in df_po_display.columns: df_po_display[col] = df_po_display[col].astype(str).replace("nan", "")
-
-        numeric_cols = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees"]
-        for col in numeric_cols:
-            if col in df_po_display.columns:
-                df_po_display[col] = pd.to_numeric(df_po_display[col], errors='coerce').fillna(0).astype(float)
-
-        display_cols = ["Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
-                        "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", 
-                        "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type"]
+    if not df_merged.empty:
+        # ใช้ df_merged ในการแสดงผลตาราง PO เช่นกัน เพื่อให้ข้อมูลเป็นชุดเดียวกัน
+        # แต่ใน Tab นี้อาจจะไม่ได้ต้องการโชว์ ยอดขาย หรือ รูปใหญ่เท่า Tab แรก
         
-        cols_to_show = [c for c in display_cols if c in df_po_display.columns]
+        # คอลัมน์สำหรับ Tab PO (เน้นข้อมูล PO)
+        po_display_cols = [
+            "Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
+            "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"
+        ]
+        cols_to_show = [c for c in po_display_cols if c in df_merged.columns]
 
+        # Data Cleaning for Display
+        df_display = df_merged.copy()
+        if "Image" in df_display.columns: df_display["Image"] = df_display["Image"].fillna("").astype(str)
+        
         st.data_editor(
-            df_po_display[cols_to_show],
+            df_display[cols_to_show],
             column_config={
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width="small"),
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width="small"),
