@@ -12,7 +12,7 @@ import gspread
 # ==========================================
 st.set_page_config(page_title="JST Hybrid Dashboard", layout="wide")
 
-# CSS สำหรับ Card UI สวยๆ
+# CSS: Card UI + จัดกึ่งกลางหัวตาราง
 st.markdown("""
 <style>
     /* Card Container */
@@ -46,6 +46,11 @@ st.markdown("""
     .text-cyan { color: #00e5ff !important; }
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
+    
+    /* จัดกึ่งกลางหัวตาราง */
+    [data-testid="stDataFrame"] th {
+        text-align: center !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,7 +186,7 @@ if not df_stock.empty and not df_sale.empty:
     
     st.divider()
     
-    # --- 2. Filter & Search ---
+    # --- 2. Filter & Search (เปลี่ยนเป็น Dropdown ค้นหาได้) ---
     st.subheader("📦 เช็คสถานะสินค้าล่าสุด")
     
     col_filter_1, col_filter_2 = st.columns([2, 1])
@@ -191,32 +196,39 @@ if not df_stock.empty and not df_sale.empty:
         status_filter = st.multiselect("กรองสถานะ", filter_options, default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
         
     with col_filter_2:
-        search_query = st.text_input("🔍 ค้นหา (ชื่อสินค้า หรือ รหัส)", "")
+        # เตรียมตัวเลือกค้นหา: รวม "ชื่อสินค้า (รหัส)" เพื่อให้ User พิมพ์ค้นหาได้ง่าย
+        merged['Search_Label'] = merged.apply(lambda x: f"{x['Product_Name']} ({x['Product_ID']})", axis=1)
+        search_options = merged['Search_Label'].tolist()
+        
+        # ใช้ selectbox แบบ searchable (พิมพ์แล้วตัวเลือกกรองตาม)
+        selected_product = st.selectbox(
+            "🔍 ค้นหา (พิมพ์ชื่อสินค้า หรือ รหัส)",
+            options=search_options,
+            index=None,  # เริ่มต้นเป็นค่าว่าง
+            placeholder="พิมพ์เพื่อค้นหารายการ..."
+        )
     
     # --- Logic การกรอง 2 ชั้น ---
+    
     # 1. กรองสถานะ
     if "📦 สินค้าทั้งหมด" in status_filter or not status_filter:
         show_df = merged.copy()
     else:
         show_df = merged[merged['Status'].isin(status_filter)].copy()
         
-    # 2. กรองคำค้นหา (ชื่อ OR รหัส) - แก้ไขตรงนี้
-    if search_query:
-        # ใช้เงื่อนไข OR (|) เพื่อหาทั้งใน Product_Name และ Product_ID
-        # ใช้ astype(str) เพื่อกัน error ถ้ารหัสเป็นตัวเลข และ case=False เพื่อไม่สนตัวพิมพ์เล็กใหญ่
-        show_df = show_df[
-            show_df['Product_Name'].astype(str).str.contains(search_query, case=False, na=False) |
-            show_df['Product_ID'].astype(str).str.contains(search_query, case=False, na=False)
-        ]
+    # 2. กรองจาก Selectbox ที่เลือกมา
+    if selected_product:
+        # กรองเอาเฉพาะรายการที่ตรงกับที่เลือกใน Dropdown
+        show_df = show_df[show_df['Search_Label'] == selected_product]
     
-    # --- 3. Table Display (ปรับแก้ความสูงของแถว) ---
+    show_df = show_df.sort_values(by='Current_Stock')
+    
+    # --- 3. Table Display ---
     st.data_editor(
         show_df[['Image', 'Product_ID', 'Product_Name', 'Initial_Stock', 'Qty_Sold', 'Current_Stock', 'Status']],
         column_config={
             "Image": st.column_config.ImageColumn(
                 "รูปสินค้า", 
-                # แนะนำให้ใช้ "large" (400px) หรือกำหนดตัวเลขเช่น 300, 400
-                # ถ้าใช้ 800 แถวจะสูงมากครับ
                 width="medium", 
                 help="รูปสินค้าจาก Master Sheet"
             ),
@@ -233,10 +245,7 @@ if not df_stock.empty and not df_sale.empty:
         use_container_width=True,
         height=800,
         hide_index=True,
-        # --- เพิ่มบรรทัดนี้ครับ ---
-        # กำหนดความสูงของแถวเป็น pixel (ลองปรับตัวเลขนี้ดูครับ เช่น 150, 200, 250)
-        # ค่ายิ่งน้อย ช่องยิ่งเตี้ยครับ
-        row_height=100 
+        row_height=80 # คงค่าความสูงไว้ 80 ตามที่คุยกันล่าสุด
     )
 
 else:
