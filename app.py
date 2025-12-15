@@ -64,8 +64,6 @@ def get_credentials():
 # ==========================================
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
-
-# [FIX 429 ERROR] เพิ่ม Cache ttl=300 (5 นาที) เพื่อไม่ให้ดึงข้อมูลซ้ำบ่อยเกินไป
 @st.cache_data(ttl=300)
 def get_stock_from_sheet():
     try:
@@ -80,11 +78,9 @@ def get_stock_from_sheet():
             df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         return df
     except Exception as e:
-        # ถ้า Error ให้คืนค่าว่างและแจ้งเตือน แต่ไม่หยุดโปรแกรม
-        st.warning(f"⚠️ โหลด Master Sheet ไม่ทัน (Limit): {e}")
+        st.warning(f"⚠️ โหลด Master Sheet ไม่ทัน: {e}")
         return pd.DataFrame()
 
-# [FIX 429 ERROR] เพิ่ม Cache ให้ PO Data ด้วย
 @st.cache_data(ttl=300)
 def get_po_data():
     try:
@@ -109,20 +105,16 @@ def get_po_data():
         except gspread.WorksheetNotFound:
             return pd.DataFrame()
     except Exception as e:
-        st.warning(f"⚠️ โหลด PO Data ไม่ทัน (Limit): {e}")
+        st.warning(f"⚠️ โหลด PO Data ไม่ทัน: {e}")
         return pd.DataFrame()
 
 def save_po_to_sheet(data_row, row_index=None):
-    """
-    บันทึกข้อมูลลง Google Sheet
-    """
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # แปลงวันที่ให้เป็น String ก่อนบันทึก
         formatted_row = []
         for item in data_row:
             if isinstance(item, (date, datetime)):
@@ -131,21 +123,17 @@ def save_po_to_sheet(data_row, row_index=None):
                 formatted_row.append(item)
                 
         if row_index:
-            # กรณีแก้ไข: Update บรรทัดเดิม
             range_name = f"A{row_index}:P{row_index}" 
             ws.update(range_name, [formatted_row])
         else:
-            # กรณีเพิ่มใหม่: Append
             ws.append_row(formatted_row)
             
-        # [CRITICAL] ล้าง Cache ทันทีที่มีการบันทึก เพื่อให้เห็นข้อมูลใหม่
         st.cache_data.clear() 
         return True
     except Exception as e:
         st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
         return False
 
-# [FIX 429 ERROR] เพิ่ม Cache ให้ Excel Sale ด้วย
 @st.cache_data(ttl=300)
 def get_sale_from_folder():
     try:
@@ -226,19 +214,65 @@ with tab1:
 # ==========================================
 with tab2:
     @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
-    def po_form_dialog(mode="add", default_data=None, sheet_row_index=None):
+    def po_form_dialog(mode="add"):
+        # ตัวแปรสำหรับเก็บข้อมูลที่จะใช้ในฟอร์ม
+        d = {}
+        sheet_row_index = None
         
-        d = default_data if default_data is not None else {}
-        
+        # ----------------------------------------------------
+        # ส่วนค้นหา (ทำงานเฉพาะเมื่ออยู่ในโหมดแก้ไข)
+        # ----------------------------------------------------
+        if mode == "search":
+            st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
+            # ดึงรายการ PO ทั้งหมดมาแสดง
+            if not df_po_display.empty:
+                # สร้าง list ตัวเลือก: "เลขPO (รหัสสินค้า)"
+                po_choices = df_po_display.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
+                selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
+                
+                if selected_po_str:
+                    # แกะเลข PO และ รหัสสินค้า ออกมาจาก string ที่เลือก
+                    # Format: "PO-123 (SP001)"
+                    sel_po = selected_po_str.split(" (")[0]
+                    sel_pid = selected_po_str.split(" (")[1].replace(")", "")
+                    
+                    # ค้นหาข้อมูลจาก Dataframe
+                    found_row = df_po_display[
+                        (df_po_display['PO_Number'] == sel_po) & 
+                        (df_po_display['Product_ID'] == sel_pid)
+                    ]
+                    
+                    if not found_row.empty:
+                        d = found_row.iloc[0].to_dict()
+                        sheet_row_index = int(d['Sheet_Row_Index'])
+                        st.success(f"พบข้อมูล PO: {sel_po}")
+                        st.divider()
+                    else:
+                        st.error("ไม่พบข้อมูล (อาจมีข้อผิดพลาดในการดึงข้อมูล)")
+                        return # หยุดทำงานถ้าไม่เจอ
+                else:
+                    st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
+                    return # หยุดทำงานถ้ายังไม่เลือก
+            else:
+                st.warning("ยังไม่มีข้อมูล PO ในระบบ")
+                return
+
+        # ----------------------------------------------------
+        # ส่วนฟอร์มบันทึก (Add / Edit)
+        # ----------------------------------------------------
+        # Header ของฟอร์ม
+        form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
+        st.markdown(f"#### {form_title}")
+
         st.markdown("##### 1. ค้นหารหัสสินค้า")
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
         default_idx = None
-        if mode == "edit" and "Product_ID" in d:
+        if mode == "search" and "Product_ID" in d:
              matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]))]
              if matches: default_idx = matches[0]
 
-        selected_option = st.selectbox("ค้นหารหัส", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
+        selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
         
         master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
         master_pid = ""
@@ -303,7 +337,7 @@ with tab2:
                     p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=val_num("TikTok_Price"), placeholder="0.00")
                     
                     def_transport_idx = 0
-                    if mode == "edit" and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
+                    if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
                     transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
                     
                     calc_guide = (qty_ord or 0) * (p_1688_ship or 0)
@@ -311,7 +345,7 @@ with tab2:
                     st.markdown("---")
                     f_col1, f_col2 = st.columns([2, 1])
                     with f_col1:
-                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f} (คุณแก้ตัวเลขด้านล่างได้)")
+                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
                         initial_total = val_num("Total_Yuan")
                         if initial_total is None:
                             initial_total = calc_guide if calc_guide > 0 else None
@@ -320,7 +354,7 @@ with tab2:
 
                     with f_col2:
                         st.write(""); st.write("")
-                        btn_label = "✅ เพิ่มข้อมูลใหม่" if mode == "add" else "💾 บันทึกการแก้ไข"
+                        btn_label = "✅ ยืนยันเพิ่ม" if mode == "add" else "💾 บันทึกทับ"
                         submitted = st.form_submit_button(btn_label, type="primary", use_container_width=True)
 
                     if submitted:
@@ -346,11 +380,17 @@ with tab2:
                                 st.rerun()
 
     # --- UI Logic ---
-    col_head, col_action = st.columns([4, 1])
+    col_head, col_action = st.columns([4, 2])
     with col_head: st.subheader("📋 รายการสั่งซื้อสินค้า (PO Log)")
     with col_action:
-        if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
-            po_form_dialog(mode="add")
+        # แบ่งเป็น 2 ปุ่มชัดเจน
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
+                po_form_dialog(mode="add")
+        with b2:
+            if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): 
+                po_form_dialog(mode="search")
 
     if not df_po_display.empty:
         # Data Cleaning
@@ -370,13 +410,9 @@ with tab2:
         
         cols_to_show = [c for c in display_cols if c in df_po_display.columns]
 
-        # Checkbox Column Selection
-        df_po_display.insert(0, "เลือก", False)
-        
-        edited_df = st.data_editor(
-            df_po_display[["เลือก"] + cols_to_show],
+        st.data_editor(
+            df_po_display[cols_to_show],
             column_config={
-                "เลือก": st.column_config.CheckboxColumn("เลือก", width="small"),
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width="small"),
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width="small"),
                 "PO_Number": st.column_config.TextColumn("เลข PO", width="small"),
@@ -390,19 +426,8 @@ with tab2:
             height=700, 
             use_container_width=True, 
             hide_index=True,
-            disabled=cols_to_show 
+            disabled=True 
         )
-        
-        selected_rows = edited_df[edited_df["เลือก"] == True]
-        
-        if not selected_rows.empty:
-            selected_row_data = selected_rows.iloc[0]
-            sheet_row_id = int(selected_row_data['Sheet_Row_Index'])
-            
-            st.info(f"👉 คุณเลือกรายการ: **{selected_row_data['Product_ID']} (PO: {selected_row_data['PO_Number']})**")
-            
-            if st.button("✏️ แก้ไขรายการที่เลือก", type="secondary"):
-                po_form_dialog(mode="edit", default_data=selected_row_data, sheet_row_index=sheet_row_id)
                 
     else:
         st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
