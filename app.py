@@ -229,42 +229,42 @@ with tab2:
             with col_right_form:
                 with st.form("po_form", border=False):
                     st.markdown("###### 📄 ข้อมูลทั่วไป")
+                    # แถว 1: PO, วันที่, ของมา (3 คอลัมน์)
                     r1c1, r1c2, r1c3 = st.columns(3)
                     po_num = r1c1.text_input("เลข PO *", placeholder="ระบุเลข PO")
                     order_date = r1c2.date_input("วันที่สั่ง", value=date.today())
                     recv_date = r1c3.date_input("ของมา (ประมาณ)", value=None)
                     
-                    # 1. ขยายความสูงของช่องรายละเอียด (height=180)
-                    weight_txt = r1c1.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", height=180, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg (ใส่รายละเอียดได้เยอะขึ้น)...")
+                    # แถว 2: น้ำหนักขนส่ง (แยกออกมาอยู่เดี่ยวๆ เต็มความกว้าง)
+                    weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
                     
                     st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
-                    # 2. ตั้งค่า value=None เพื่อให้ช่องว่าง (ไม่ต้องลบ 0.00)
+                    # แถว 3
                     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
                     qty_ord = r3c1.number_input("สั่งมา *", min_value=0, step=0, value=None, placeholder="0") 
                     qty_rem = r3c2.number_input("เหลือ *", min_value=0, step=0, value=None, placeholder="0")
                     yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     
+                    # แถว 4
                     r4c1, r4c2, r4c3 = st.columns(3)
                     p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
 
                     st.markdown("###### 🏷️ ราคาขาย & สรุป")
+                    # แถว 5
                     r5c1, r5c2, r5c3 = st.columns(3)
                     p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=None, placeholder="0.00")
                     transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"])
                     
-                    # Handle Logic when value is None (Use 'or 0' to prevent crash)
                     calc_guide = (qty_ord or 0) * (p_1688_ship or 0)
                     
                     st.markdown("---")
                     f_col1, f_col2 = st.columns([2, 1])
                     with f_col1:
                         st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f} (คุณแก้ตัวเลขด้านล่างได้)")
-                        # ช่องนี้ตั้ง value=None ไม่ได้เพราะเราอยากให้มีตัวเลข Default ตามสูตร แต่ถ้า user อยากแก้ก็แก้ได้
-                        # แต่ถ้าสูตรคำนวณได้ 0 ก็ให้แสดง None เพื่อให้ช่องว่าง
                         initial_total = calc_guide if calc_guide > 0 else None
                         total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=initial_total, placeholder="0.00")
 
@@ -277,14 +277,12 @@ with tab2:
                         if not master_pid: errors.append("ยังไม่ได้เลือกสินค้า")
                         if not po_num: errors.append("ยังไม่ได้ระบุเลข PO")
                         
-                        # Check logic (Handle None)
                         if (qty_ord or 0) <= 0: errors.append("จำนวนสั่งซื้อต้องมากกว่า 0")
                         if (p_1688_ship or 0) <= 0: errors.append("ราคาต้นทุนรวมส่งต้องมากกว่า 0")
                         if (total_yuan_input or 0) <= 0: errors.append("ยอดรวมหยวนต้องมากกว่า 0")
                         
                         if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                         else:
-                            # Convert None to 0 or appropriate empty value for saving
                             new_row = [
                                 master_pid, po_num, order_date, recv_date, weight_txt, 
                                 qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
