@@ -8,15 +8,52 @@ from googleapiclient.http import MediaIoBaseDownload
 import gspread
 
 # ==========================================
-# 1. ตั้งค่า ID (ถูกต้องตามรูปภาพของคุณ)
+# 1. ตั้งค่า Page & CSS Styles
 # ==========================================
 st.set_page_config(page_title="JST Hybrid Dashboard", layout="wide")
 
-# Stock: ใช้ Master Sheet ID (จากรูปที่ 1)
-MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
-TAB_NAME_STOCK = "MASTER"  # ชื่อแท็บในรูปที่ 1
+# CSS สำหรับ Card UI สวยๆ
+st.markdown("""
+<style>
+    /* Card Container */
+    .metric-card {
+        background-color: #1a1a1a;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    /* Text Styles */
+    .metric-title {
+        color: #b0b0b0;
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 5px;
+    }
+    .metric-value {
+        color: #ffffff;
+        font-size: 28px;
+        font-weight: bold;
+    }
+    .metric-sub {
+        font-size: 12px;
+        margin-top: 5px;
+    }
+    /* Border & Text Colors */
+    .border-cyan { border-left: 4px solid #00e5ff; }
+    .border-gold { border-left: 4px solid #ffd700; }
+    .border-red  { border-left: 4px solid #ff4d4d; }
+    .text-cyan { color: #00e5ff !important; }
+    .text-gold { color: #ffd700 !important; }
+    .text-red  { color: #ff4d4d !important; }
+</style>
+""", unsafe_allow_html=True)
 
-# Sale: ใช้ Folder ID (จากรูปที่ 3)
+# Stock: Master Sheet ID
+MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
+TAB_NAME_STOCK = "MASTER"
+
+# Sale: Folder ID
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 
 # ==========================================
@@ -32,10 +69,9 @@ def get_credentials():
     return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
 # ==========================================
-# 3. ฟังก์ชันดึงข้อมูล (Hybrid)
+# 3. ฟังก์ชันดึงข้อมูล
 # ==========================================
 def get_stock_from_sheet():
-    """ดึงสต็อกสินค้าจาก Google Sheet (Master)"""
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
@@ -43,11 +79,9 @@ def get_stock_from_sheet():
         ws = sh.worksheet(TAB_NAME_STOCK)
         df = pd.DataFrame(ws.get_all_records())
         
-        # แปลงชื่อคอลัมน์ (ตามรูปที่ 1)
         col_map = {'รูปภาพ':'Image', 'รหัสสินค้า':'Product_ID', 'ชื่อสินค้า':'Product_Name', 'สินค้าคงคลัง':'Initial_Stock'}
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
-        # แปลงตัวเลข
         if 'Initial_Stock' in df.columns:
             df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             
@@ -57,12 +91,10 @@ def get_stock_from_sheet():
         return pd.DataFrame()
 
 def get_sale_from_folder():
-    """ดึงยอดขายจากไฟล์ Excel ล่าสุดใน Drive Folder"""
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
         
-        # หาไฟล์ล่าสุดในโฟลเดอร์ Sale
         results = service.files().list(
             q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false",
             orderBy='modifiedTime desc', pageSize=1, fields="files(id, name)").execute()
@@ -70,7 +102,6 @@ def get_sale_from_folder():
         
         if not items: return pd.DataFrame()
         
-        # ดาวน์โหลด
         file_id = items[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
@@ -81,7 +112,6 @@ def get_sale_from_folder():
         
         df = pd.read_excel(fh)
         
-        # แปลงชื่อคอลัมน์ (ปรับตามไฟล์ JST 12.12)
         col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
@@ -106,41 +136,104 @@ with st.spinner('กำลังรวมข้อมูล Stock (Sheet) แล
     df_sale = get_sale_from_folder()
 
 if not df_stock.empty and not df_sale.empty:
-    # รวมข้อมูล
+    # --- Data Processing ---
     sold_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
     merged = pd.merge(df_stock, sold_summary, on='Product_ID', how='left')
     merged['Qty_Sold'] = merged['Qty_Sold'].fillna(0)
     merged['Current_Stock'] = merged['Initial_Stock'] - merged['Qty_Sold']
     
-    # กำหนดสถานะ
     def get_status(val):
         if val <= 0: return "🔴 หมดเกลี้ยง"
         elif val < 10: return "⚠️ ใกล้หมด"
         else: return "🟢 มีของ"
     merged['Status'] = merged['Current_Stock'].apply(get_status)
 
-    # Metric
+    # --- 1. Custom Metrics Cards ---
+    total_items = len(merged)
+    total_sold = int(merged['Qty_Sold'].sum())
+    total_restock = len(merged[merged['Current_Stock'] < 10])
+
     c1, c2, c3 = st.columns(3)
-    c1.metric("📦 สินค้าทั้งหมด", f"{len(merged)} รายการ")
-    c2.metric("💰 ขายไปแล้ว", f"{int(merged['Qty_Sold'].sum())} ชิ้น")
-    c3.metric("⚠️ ต้องเติมของ", f"{len(merged[merged['Current_Stock'] < 10])} รายการ")
+    with c1:
+        st.markdown(f"""
+        <div class="metric-card border-cyan">
+            <div class="metric-title">สินค้าทั้งหมด</div>
+            <div class="metric-value text-cyan">{total_items:,} <span style="font-size:16px; color:#fff;">รายการ</span></div>
+            <div class="metric-sub" style="color:#00e5ff;">100% Stock</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="metric-card border-gold">
+            <div class="metric-title">💰 ขายไปแล้ว</div>
+            <div class="metric-value text-gold">{total_sold:,} <span style="font-size:16px; color:#fff;">ชิ้น</span></div>
+            <div class="metric-sub" style="color:#ffd700;">Active Sales</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="metric-card border-red">
+            <div class="metric-title">⚠️ ต้องเติมของ</div>
+            <div class="metric-value text-red">{total_restock:,} <span style="font-size:16px; color:#fff;">รายการ</span></div>
+            <div class="metric-sub" style="color:#ff4d4d;">Critical Stock</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.divider()
     
-    # ตารางเช็คสต็อก
+    # --- 2. Filter & Search ---
     st.subheader("📦 เช็คสถานะสินค้าล่าสุด")
-    status_filter = st.multiselect("กรองสถานะ", ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
-    show_df = merged[merged['Status'].isin(status_filter)].sort_values(by='Current_Stock')
     
+    col_filter_1, col_filter_2 = st.columns([2, 1])
+    
+    with col_filter_1:
+        filter_options = ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"]
+        status_filter = st.multiselect("กรองสถานะ", filter_options, default=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด"])
+        
+    with col_filter_2:
+        search_query = st.text_input("🔍 ค้นหา (ชื่อสินค้า หรือ รหัส)", "")
+    
+    # --- Logic การกรอง 2 ชั้น ---
+    # 1. กรองสถานะ
+    if "📦 สินค้าทั้งหมด" in status_filter or not status_filter:
+        show_df = merged.copy()
+    else:
+        show_df = merged[merged['Status'].isin(status_filter)].copy()
+        
+    # 2. กรองคำค้นหา (ชื่อ OR รหัส) - แก้ไขตรงนี้
+    if search_query:
+        # ใช้เงื่อนไข OR (|) เพื่อหาทั้งใน Product_Name และ Product_ID
+        # ใช้ astype(str) เพื่อกัน error ถ้ารหัสเป็นตัวเลข และ case=False เพื่อไม่สนตัวพิมพ์เล็กใหญ่
+        show_df = show_df[
+            show_df['Product_Name'].astype(str).str.contains(search_query, case=False, na=False) |
+            show_df['Product_ID'].astype(str).str.contains(search_query, case=False, na=False)
+        ]
+    
+    show_df = show_df.sort_values(by='Current_Stock')
+    
+    # --- 3. Table Display ---
     st.data_editor(
         show_df[['Image', 'Product_ID', 'Product_Name', 'Initial_Stock', 'Qty_Sold', 'Current_Stock', 'Status']],
         column_config={
-            "Image": st.column_config.ImageColumn("รูป"),
-            "Current_Stock": st.column_config.ProgressColumn("คงเหลือ", format="%d", min_value=0, max_value=int(merged['Initial_Stock'].max()))
+            "Image": st.column_config.ImageColumn(
+                "รูปสินค้า", 
+                width="large", 
+                help="รูปสินค้าจาก Master Sheet"
+            ),
+            "Current_Stock": st.column_config.ProgressColumn(
+                "คงเหลือ", 
+                format="%d", 
+                min_value=0, 
+                max_value=int(merged['Initial_Stock'].max()) if len(merged) > 0 else 100
+            ),
+            "Qty_Sold": st.column_config.NumberColumn("ขายแล้ว"),
+            "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width="medium"),
+            "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
         },
         use_container_width=True,
-        height=600,
+        height=800,
         hide_index=True
     )
+
 else:
     st.warning("⚠️ ข้อมูลยังมาไม่ครบ โปรดตรวจสอบสิทธิ์การเข้าถึงไฟล์")
