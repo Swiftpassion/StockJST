@@ -220,23 +220,18 @@ with tab2:
         sheet_row_index = None
         
         # ----------------------------------------------------
-        # ส่วนค้นหา (ทำงานเฉพาะเมื่ออยู่ในโหมดแก้ไข)
+        # ส่วนค้นหา
         # ----------------------------------------------------
         if mode == "search":
             st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
-            # ดึงรายการ PO ทั้งหมดมาแสดง
             if not df_po_display.empty:
-                # สร้าง list ตัวเลือก: "เลขPO (รหัสสินค้า)"
                 po_choices = df_po_display.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
                 selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
                 
                 if selected_po_str:
-                    # แกะเลข PO และ รหัสสินค้า ออกมาจาก string ที่เลือก
-                    # Format: "PO-123 (SP001)"
                     sel_po = selected_po_str.split(" (")[0]
                     sel_pid = selected_po_str.split(" (")[1].replace(")", "")
                     
-                    # ค้นหาข้อมูลจาก Dataframe
                     found_row = df_po_display[
                         (df_po_display['PO_Number'] == sel_po) & 
                         (df_po_display['Product_ID'] == sel_pid)
@@ -249,18 +244,17 @@ with tab2:
                         st.divider()
                     else:
                         st.error("ไม่พบข้อมูล (อาจมีข้อผิดพลาดในการดึงข้อมูล)")
-                        return # หยุดทำงานถ้าไม่เจอ
+                        return
                 else:
                     st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
-                    return # หยุดทำงานถ้ายังไม่เลือก
+                    return
             else:
                 st.warning("ยังไม่มีข้อมูล PO ในระบบ")
                 return
 
         # ----------------------------------------------------
-        # ส่วนฟอร์มบันทึก (Add / Edit)
+        # ส่วนฟอร์ม
         # ----------------------------------------------------
-        # Header ของฟอร์ม
         form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
         st.markdown(f"#### {form_title}")
 
@@ -321,8 +315,9 @@ with tab2:
                         v = d.get(key)
                         return float(v) if v and str(v) != "nan" and float(v) != 0 else default
 
-                    qty_ord = r3c1.number_input("สั่งมา *", min_value=0, step=0, value=val_num("Qty_Ordered"), placeholder="0") 
-                    qty_rem = r3c2.number_input("เหลือ *", min_value=0, step=0, value=val_num("Qty_Remaining"), placeholder="0")
+                    # [FIXED] Changed min_value=0 to 0.0, step=0 to 0.0 to match Float type
+                    qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=val_num("Qty_Ordered"), placeholder="0") 
+                    qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=val_num("Qty_Remaining"), placeholder="0")
                     yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Yuan_Rate"), placeholder="0.00")
                     fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=val_num("Fees"), placeholder="0.00")
                     
