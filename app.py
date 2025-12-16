@@ -52,25 +52,22 @@ st.markdown("""
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
     
-    /* ============================================================
-       [แก้ไข] ส่วนตกแต่งหัวตาราง (Table Headers)
-       ============================================================ */
+    /* Table Headers */
     [data-testid="stDataFrame"] th { 
-        text-align: center !important;      /* 1. จัดกึ่งกลาง */
-        background-color: #0047AB !important; /* 2. ใส่สีพื้นหลังน้ำเงิน (Cobalt Blue) */
-        color: white !important;            /* เปลี่ยนสีตัวอักษรเป็นขาวให้อ่านง่าย */
+        text-align: center !important;
+        background-color: #0047AB !important;
+        color: white !important;
         white-space: pre-wrap !important; 
         vertical-align: middle !important;
         min-height: 60px;
         font-size: 14px;
-        border-bottom: 2px solid #ffffff !important; /* เพิ่มเส้นขอบล่างสีขาวให้ดูมีมิติ */
+        border-bottom: 2px solid #ffffff !important;
     }
     
-    /* แก้ไขมุมโค้งของหัวตารางซ้ายสุด/ขวาสุด (Optional: เพื่อความสวยงาม) */
     [data-testid="stDataFrame"] th:first-child { border-top-left-radius: 8px; }
     [data-testid="stDataFrame"] th:last-child { border-top-right-radius: 8px; }
 
-    /* Table Cells: บังคับตัดคำเป็น ... ถ้าล้น */
+    /* Table Cells */
     [data-testid="stDataFrame"] td {
         white-space: nowrap;
         overflow: hidden;
@@ -208,7 +205,7 @@ def get_sale_from_folder():
         return pd.DataFrame()
 
 # ==========================================
-# 4. Main App Structure
+# 4. Main App Structure & Data Loading
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
@@ -220,72 +217,223 @@ with st.spinner('กำลังโหลดข้อมูล...'):
 
     if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
     if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
+
+# ==========================================
+# 5. DIALOG FUNCTIONS (MOVED HERE TO FIX RELOAD ISSUE)
+# ==========================================
+
+# --- Dialog 1: ประวัติการสั่งซื้อ (สำหรับ Tab 1) ---
+@st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
+def show_history_dialog():
+    st.caption("ค้นหาและเลือกสินค้าเพื่อดูประวัติการสั่งซื้อทั้งหมด")
     
+    if df_master.empty or df_po.empty:
+        st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
+        return
+
+    product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+    selected_product = st.selectbox(
+        "🔍 ค้นหาสินค้า (ชื่อ/รหัส)", 
+        options=product_options,
+        index=None,
+        placeholder="พิมพ์เพื่อค้นหา..."
+    )
+
+    if selected_product:
+        selected_pid = selected_product.split(" : ")[0]
+        history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
+        
+        if not history_df.empty:
+            if 'Order_Date' in history_df.columns:
+                history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
+                history_df = history_df.sort_values(by='Order_Date', ascending=False)
+                history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
+
+            st.divider()
+            st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
+            
+            st.dataframe(
+                history_df,
+                column_config={
+                    "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
+                    "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
+                    "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
+                    "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
+                    "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
+                    "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                    "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                    "Yuan_Rate": st.column_config.NumberColumn("เรทหยวน", format="%.2f"),
+                    "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคาต่อชิ้น\nไม่รวม VAT", format="%.2f"),
+                    "Price_1688_NoShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nไม่รวมค่าส่ง", format="%.2f"),
+                    "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f"),
+                    "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
+                    "Shopee_Price": st.column_config.NumberColumn("ราคาใน\nช้อปปี้", format="%.2f"),
+                    "TikTok_Price": st.column_config.NumberColumn("ราคาใน\nTIKTOK", format="%.2f"),
+                    "Fees": st.column_config.NumberColumn("ค่า\nธรรมเนียม", format="%.2f"),
+                    "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
+                },
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+        else:
+            st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
+
+# --- Dialog 2: จัดการ PO (สำหรับ Tab 2) ---
+@st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
+def po_form_dialog(mode="add"):
+    d = {}
+    sheet_row_index = None
+    
+    if mode == "search":
+        st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
+        if not df_po.empty: 
+            po_choices = df_po.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
+            selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
+            
+            if selected_po_str:
+                sel_po = selected_po_str.split(" (")[0]
+                sel_pid = selected_po_str.split(" (")[1].replace(")", "")
+                found_row = df_po[(df_po['PO_Number'] == sel_po) & (df_po['Product_ID'] == sel_pid)]
+                
+                if not found_row.empty:
+                    d = found_row.iloc[0].to_dict()
+                    sheet_row_index = int(d['Sheet_Row_Index'])
+                    st.success(f"พบข้อมูล PO: {sel_po}")
+                    st.divider()
+                else:
+                    st.error("ไม่พบข้อมูล")
+                    return
+            else:
+                st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
+                return
+        else:
+            st.warning("ยังไม่มีข้อมูล PO ในระบบ")
+            return
+
+    form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
+    st.markdown(f"#### {form_title}")
+
+    st.markdown("##### 1. ค้นหารหัสสินค้า")
+    product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+    
+    default_idx = None
+    if mode == "search" and "Product_ID" in d:
+         matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]))]
+         if matches: default_idx = matches[0]
+
+    selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
+    
+    master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
+    master_pid = ""
+    master_name = ""
+
+    if selected_option:
+        master_pid = selected_option.split(" : ")[0]
+        row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
+        master_name = row_info['Product_Name']
+        if row_info['Image']: master_img_url = row_info['Image']
+    st.write("") 
+
+    with st.container(border=True):
+        col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
+        with col_left_img:
+            st.markdown(f"**{master_pid}**") 
+            st.image(master_img_url, use_container_width=True)
+            if master_name: st.caption(f"{master_name}")
+        
+        with col_right_form:
+            with st.form("po_form", border=False):
+                st.markdown("###### 📄 ข้อมูลทั่วไป")
+                def get_date_val(val):
+                    if not val or val == "" or val == "nan": return None
+                    try: return datetime.strptime(str(val), "%Y-%m-%d").date()
+                    except:
+                        try: return datetime.strptime(str(val), "%d/%m/%Y").date()
+                        except: return None
+                
+                r1c1, r1c2, r1c3 = st.columns(3)
+                po_num = r1c1.text_input("เลข PO *", value=d.get("PO_Number", ""), placeholder="ระบุเลข PO")
+                
+                def_order_date = get_date_val(d.get("Order_Date")) or date.today()
+                def_recv_date = get_date_val(d.get("Received_Date"))
+                
+                order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date)
+                recv_date = r1c3.date_input("ของมา (ประมาณ)", value=def_recv_date)
+                
+                weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight", ""), height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
+                
+                st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
+                r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+                
+                def val_num(key, default=None):
+                    v = d.get(key)
+                    try: return float(v) if v and str(v) != "nan" and float(v) != 0 else default
+                    except: return default
+
+                qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=val_num("Qty_Ordered"), placeholder="0") 
+                qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=val_num("Qty_Remaining"), placeholder="0")
+                yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Yuan_Rate"), placeholder="0.00")
+                fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=val_num("Fees"), placeholder="0.00")
+                
+                r4c1, r4c2, r4c3 = st.columns(3)
+                p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_Unit_NoVAT"), placeholder="0.00")
+                p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_NoShip"), placeholder="0.00")
+                p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_WithShip"), placeholder="0.00")
+
+                st.markdown("###### 🏷️ ราคาขาย & สรุป")
+                r5c1, r5c2, r5c3 = st.columns(3)
+                p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=val_num("Shopee_Price"), placeholder="0.00")
+                p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=val_num("TikTok_Price"), placeholder="0.00")
+                
+                def_transport_idx = 0
+                if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
+                transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
+                
+                calc_guide = (qty_ord or 0) * (p_1688_ship or 0)
+                
+                st.markdown("---")
+                f_col1, f_col2 = st.columns([2, 1])
+                with f_col1:
+                    st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
+                    initial_total = val_num("Total_Yuan")
+                    if initial_total is None: initial_total = calc_guide if calc_guide > 0 else None
+                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=initial_total, placeholder="0.00")
+
+                with f_col2:
+                    st.write(""); st.write("")
+                    btn_label = "✅ ยืนยันเพิ่ม" if mode == "add" else "💾 บันทึกทับ"
+                    submitted = st.form_submit_button(btn_label, type="primary", use_container_width=True)
+
+                if submitted:
+                    errors = []
+                    if not master_pid: errors.append("ยังไม่ได้เลือกสินค้า")
+                    if not po_num: errors.append("ยังไม่ได้ระบุเลข PO")
+                    if (qty_ord or 0) <= 0: errors.append("จำนวนสั่งซื้อต้องมากกว่า 0")
+                    if (p_1688_ship or 0) <= 0: errors.append("ราคาต้นทุนรวมส่งต้องมากกว่า 0")
+                    if (total_yuan_input or 0) <= 0: errors.append("ยอดรวมหยวนต้องมากกว่า 0")
+                    
+                    if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
+                    else:
+                        new_row = [
+                            master_pid, po_num, order_date, recv_date, weight_txt, 
+                            qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
+                            p_1688_noship or 0, p_1688_ship or 0, total_yuan_input or 0, 
+                            p_shopee or 0, p_tiktok or 0, fees or 0, transport
+                        ]
+                        if save_po_to_sheet(new_row, row_index=sheet_row_index): 
+                            st.success("บันทึกเรียบร้อย!")
+                            st.rerun()
+
+# ==========================================
+# 6. TABS & UI LOGIC
+# ==========================================
 tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
 # TAB 1: Stock Report (MASTER BASED)
 # ==========================================
 with tab1:
-    # --- Function: History Dialog ---
-    @st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
-    def show_history_dialog():
-        st.caption("ค้นหาและเลือกสินค้าเพื่อดูประวัติการสั่งซื้อทั้งหมด")
-        
-        if df_master.empty or df_po.empty:
-            st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
-            return
-
-        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        selected_product = st.selectbox(
-            "🔍 ค้นหาสินค้า (ชื่อ/รหัส)", 
-            options=product_options,
-            index=None,
-            placeholder="พิมพ์เพื่อค้นหา..."
-        )
-
-        if selected_product:
-            selected_pid = selected_product.split(" : ")[0]
-            history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
-            
-            if not history_df.empty:
-                if 'Order_Date' in history_df.columns:
-                    history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
-                    history_df = history_df.sort_values(by='Order_Date', ascending=False)
-                    history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
-
-                st.divider()
-                st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
-                
-                # [แก้ไขล่าสุด] ปรับหัวตารางเป็นภาษาไทยครบทุกคอลัมน์
-                st.dataframe(
-                    history_df,
-                    column_config={
-                        "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
-                        "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
-                        "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
-                        "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
-                        "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
-                        "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
-                        "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                        "Yuan_Rate": st.column_config.NumberColumn("เรทหยวน", format="%.2f"),
-                        "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคาต่อชิ้น\nไม่รวม VAT", format="%.2f"),
-                        "Price_1688_NoShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nไม่รวมค่าส่ง", format="%.2f"),
-                        "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f"),
-                        "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
-                        "Shopee_Price": st.column_config.NumberColumn("ราคาใน\nช้อปปี้", format="%.2f"),
-                        "TikTok_Price": st.column_config.NumberColumn("ราคาใน\nTIKTOK", format="%.2f"),
-                        "Fees": st.column_config.NumberColumn("ค่า\nธรรมเนียม", format="%.2f"),
-                        "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
-                    },
-                    use_container_width=True,
-                    hide_index=True,
-                    height=400
-                )
-            else:
-                st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
-
-    # --- Main Logic ---
     if not df_master.empty:
         df_po_latest = pd.DataFrame()
         if not df_po.empty:
@@ -342,7 +490,8 @@ with tab1:
             st.button("❌ ล้าง", on_click=clear_filters)
         with col_b2:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            if st.button("📜 ดูประวัติ", type="secondary"): show_history_dialog()
+            if st.button("📜 ดูประวัติ", type="secondary"): 
+                show_history_dialog() # Calling global dialog
         with col_b3:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
@@ -412,8 +561,6 @@ with tab1:
                 "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=COL_WIDTH),
                 "Status": st.column_config.TextColumn("Status", width=COL_WIDTH),
             },
-            # [แก้ไข] ปรับความสูงตรงนี้ครับ (เช่น 2300 สำหรับจอแนวตั้ง)
-            # ถ้าหัวตารางหาย ให้ลดตัวเลขนี้ลงมาให้พอดีกับความสูงจอของคุณครับ
             height=2300, 
             use_container_width=True,
             hide_index=True
@@ -425,160 +572,17 @@ with tab1:
 # TAB 2: Purchase Orders
 # ==========================================
 with tab2:
-    @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
-    def po_form_dialog(mode="add"):
-        d = {}
-        sheet_row_index = None
-        
-        if mode == "search":
-            st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
-            if not df_po.empty: 
-                po_choices = df_po.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
-                selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
-                
-                if selected_po_str:
-                    sel_po = selected_po_str.split(" (")[0]
-                    sel_pid = selected_po_str.split(" (")[1].replace(")", "")
-                    found_row = df_po[(df_po['PO_Number'] == sel_po) & (df_po['Product_ID'] == sel_pid)]
-                    
-                    if not found_row.empty:
-                        d = found_row.iloc[0].to_dict()
-                        sheet_row_index = int(d['Sheet_Row_Index'])
-                        st.success(f"พบข้อมูล PO: {sel_po}")
-                        st.divider()
-                    else:
-                        st.error("ไม่พบข้อมูล")
-                        return
-                else:
-                    st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
-                    return
-            else:
-                st.warning("ยังไม่มีข้อมูล PO ในระบบ")
-                return
-
-        form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
-        st.markdown(f"#### {form_title}")
-
-        st.markdown("##### 1. ค้นหารหัสสินค้า")
-        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        
-        default_idx = None
-        if mode == "search" and "Product_ID" in d:
-             matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]))]
-             if matches: default_idx = matches[0]
-
-        selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
-        
-        master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
-        master_pid = ""
-        master_name = ""
-
-        if selected_option:
-            master_pid = selected_option.split(" : ")[0]
-            row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
-            master_name = row_info['Product_Name']
-            if row_info['Image']: master_img_url = row_info['Image']
-        st.write("") 
-
-        with st.container(border=True):
-            col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
-            with col_left_img:
-                st.markdown(f"**{master_pid}**") 
-                st.image(master_img_url, use_container_width=True)
-                if master_name: st.caption(f"{master_name}")
-            
-            with col_right_form:
-                with st.form("po_form", border=False):
-                    st.markdown("###### 📄 ข้อมูลทั่วไป")
-                    def get_date_val(val):
-                        if not val or val == "" or val == "nan": return None
-                        try: return datetime.strptime(str(val), "%Y-%m-%d").date()
-                        except:
-                            try: return datetime.strptime(str(val), "%d/%m/%Y").date()
-                            except: return None
-                    
-                    r1c1, r1c2, r1c3 = st.columns(3)
-                    po_num = r1c1.text_input("เลข PO *", value=d.get("PO_Number", ""), placeholder="ระบุเลข PO")
-                    
-                    def_order_date = get_date_val(d.get("Order_Date")) or date.today()
-                    def_recv_date = get_date_val(d.get("Received_Date"))
-                    
-                    order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date)
-                    recv_date = r1c3.date_input("ของมา (ประมาณ)", value=def_recv_date)
-                    
-                    weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight", ""), height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
-                    
-                    st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
-                    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-                    
-                    def val_num(key, default=None):
-                        v = d.get(key)
-                        try: return float(v) if v and str(v) != "nan" and float(v) != 0 else default
-                        except: return default
-
-                    qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=val_num("Qty_Ordered"), placeholder="0") 
-                    qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=val_num("Qty_Remaining"), placeholder="0")
-                    yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Yuan_Rate"), placeholder="0.00")
-                    fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=val_num("Fees"), placeholder="0.00")
-                    
-                    r4c1, r4c2, r4c3 = st.columns(3)
-                    p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_Unit_NoVAT"), placeholder="0.00")
-                    p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_NoShip"), placeholder="0.00")
-                    p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_WithShip"), placeholder="0.00")
-
-                    st.markdown("###### 🏷️ ราคาขาย & สรุป")
-                    r5c1, r5c2, r5c3 = st.columns(3)
-                    p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=val_num("Shopee_Price"), placeholder="0.00")
-                    p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=val_num("TikTok_Price"), placeholder="0.00")
-                    
-                    def_transport_idx = 0
-                    if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
-                    transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
-                    
-                    calc_guide = (qty_ord or 0) * (p_1688_ship or 0)
-                    
-                    st.markdown("---")
-                    f_col1, f_col2 = st.columns([2, 1])
-                    with f_col1:
-                        st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
-                        initial_total = val_num("Total_Yuan")
-                        if initial_total is None: initial_total = calc_guide if calc_guide > 0 else None
-                        total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=initial_total, placeholder="0.00")
-
-                    with f_col2:
-                        st.write(""); st.write("")
-                        btn_label = "✅ ยืนยันเพิ่ม" if mode == "add" else "💾 บันทึกทับ"
-                        submitted = st.form_submit_button(btn_label, type="primary", use_container_width=True)
-
-                    if submitted:
-                        errors = []
-                        if not master_pid: errors.append("ยังไม่ได้เลือกสินค้า")
-                        if not po_num: errors.append("ยังไม่ได้ระบุเลข PO")
-                        if (qty_ord or 0) <= 0: errors.append("จำนวนสั่งซื้อต้องมากกว่า 0")
-                        if (p_1688_ship or 0) <= 0: errors.append("ราคาต้นทุนรวมส่งต้องมากกว่า 0")
-                        if (total_yuan_input or 0) <= 0: errors.append("ยอดรวมหยวนต้องมากกว่า 0")
-                        
-                        if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
-                        else:
-                            new_row = [
-                                master_pid, po_num, order_date, recv_date, weight_txt, 
-                                qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
-                                p_1688_noship or 0, p_1688_ship or 0, total_yuan_input or 0, 
-                                p_shopee or 0, p_tiktok or 0, fees or 0, transport
-                            ]
-                            if save_po_to_sheet(new_row, row_index=sheet_row_index): 
-                                st.success("บันทึกเรียบร้อย!")
-                                st.rerun()
-
     # --- UI Logic ---
     col_head, col_action = st.columns([4, 2])
     with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า")
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): po_form_dialog(mode="add")
+            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
+                po_form_dialog(mode="add") # Calling global dialog
         with b2:
-            if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): po_form_dialog(mode="search")
+            if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): 
+                po_form_dialog(mode="search") # Calling global dialog
 
     if not df_po.empty:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
@@ -598,15 +602,14 @@ with tab2:
         ]
         cols_to_show = [c for c in po_display_cols if c in df_po_display.columns]
 
-        # [แก้ไข] เปลี่ยนหัวตาราง Tab 2 ให้เป็นภาษาไทย (ตาม Tab 1)
         st.data_editor(
             df_po_display[cols_to_show],
             column_config={
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
                 "PO_Number": st.column_config.TextColumn("เลข PO", width=100),
-                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=100), # เปลี่ยนจาก Order_Date
-                "Received_Date": st.column_config.TextColumn("ของมา", width=100), # เปลี่ยนจาก Received_Date
+                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=100), 
+                "Received_Date": st.column_config.TextColumn("ของมา", width=100), 
                 "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width=200),
                 "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
                 "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
