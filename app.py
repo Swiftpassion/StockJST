@@ -55,6 +55,17 @@ def get_credentials():
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
 
+# --- Helper: Highlight Negative Numbers Red ---
+def highlight_negative(val):
+    """
+    ฟังก์ชันสำหรับใส่สีแดงให้กับตัวเลขที่น้อยกว่า 0
+    ใช้กับ df.style.map()
+    """
+    if isinstance(val, (int, float)):
+        if val < 0:
+            return 'color: #ff4b4b; font-weight: bold;'
+    return ''
+
 @st.cache_data(ttl=300)
 def get_stock_from_sheet():
     try:
@@ -298,8 +309,10 @@ def show_history_dialog(fixed_product_id=None):
 
                 st.divider()
                 st.markdown(f"### {selected_pid} : {product_name}")
+                
+                # ✅ Apply Red Color to Negative Numbers
                 st.dataframe(
-                    history_df,
+                    history_df.style.map(highlight_negative), 
                     column_config={
                         "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
                         "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
@@ -458,22 +471,41 @@ with tab1:
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
+    # --- FILTER SECTION ---
     with st.container(border=True):
-        st.markdown("##### 🔍 ตัวกรองช่วงเวลา")
-        c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
-        with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
-        with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
-        with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
-        with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
-
-    start_date = st.session_state.m_d_start
-    end_date = st.session_state.m_d_end
+        st.markdown("##### 🔍 ตัวกรองข้อมูล")
+        
+        # ✅ New Feature: Specific Date Filter
+        use_specific_date = st.checkbox("🎯 ค้นหาตามวันที่ขายจริง (Specific Sale Date)", key="filter_use_specific")
+        
+        if use_specific_date:
+            col_spec_date, _ = st.columns([1, 3])
+            with col_spec_date:
+                specific_date = st.date_input("เลือกวันที่ขาย", value=today, key="filter_specific_date")
+            
+            # Override range logic
+            start_date = specific_date
+            end_date = specific_date
+        else:
+            c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
+            with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
+            with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
+            with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
+            with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
+            start_date = st.session_state.m_d_start
+            end_date = st.session_state.m_d_end
     
     if start_date and end_date:
         if start_date > end_date: st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
-                mask = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
+                
+                # ✅ FILTER LOGIC
+                if use_specific_date:
+                    mask = df_sale['Date_Only'] == start_date
+                else:
+                    mask = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
+                
                 df_sale_filtered = df_sale.loc[mask].copy()
                 
                 if not df_sale_filtered.empty:
@@ -487,7 +519,7 @@ with tab1:
                     sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0])
                     df_pivot = df_pivot[sorted_cols]
                     
-                    # ยอดรวมในช่วงที่เลือก (แสดงผลเฉยๆ)
+                    # ยอดรวมในช่วงที่เลือก
                     df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1)
                     
                     df_pivot = df_pivot.reset_index()
@@ -500,7 +532,8 @@ with tab1:
                     else:
                         final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
 
-                    # ✅ ใช้วิธีคำนวณแบบใหม่: Stock = Master - ยอดขายวันล่าสุด (recent_sales_map)
+                    # ✅ ใช้วิธีคำนวณแบบเดิม: Stock = Master - ยอดขายวันล่าสุด (recent_sales_map)
+                    # หมายเหตุ: แม้จะเลือกวันที่ในอดีต แต่ "คงเหลือ" จะแสดงยอดปัจจุบันเสมอเพื่อให้ทราบสถานะสินค้าจริง
                     final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
                     
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
@@ -511,11 +544,13 @@ with tab1:
                     final_df = final_report[available_fixed + day_cols]
                     
                     st.divider()
-                    st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** ({len(final_df)} รายการ)")
+                    filter_msg = f"วันที่ {start_date.strftime('%d/%m/%Y')}" if use_specific_date else f"{start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}"
+                    st.markdown(f"**📊 แสดงผล: {filter_msg}** ({len(final_df)} รายการ)")
                     st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
 
+                    # ✅ Apply Red Color to Negative Numbers
                     event = st.dataframe(
-                        final_df,
+                        final_df.style.map(highlight_negative),
                         column_config={
                             "Product_ID": st.column_config.TextColumn("รหัส", width=80),
                             "Image": st.column_config.ImageColumn("รูป", width=60),
@@ -553,10 +588,22 @@ with tab2:
     if not df_po.empty and 'Product_ID' in df_po.columns and not df_master.empty:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
         if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
-        st.data_editor(
-            df_po_display[["Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"]],
-            column_config={"Image": st.column_config.ImageColumn("รูปสินค้า", width=80)},
-            height=700, use_container_width=True, hide_index=True, disabled=True 
+        
+        # ✅ Changed to st.dataframe to support RED Color Styling
+        st.dataframe(
+            df_po_display.style.map(highlight_negative),
+            column_config={
+                "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
+                "PO_Number": st.column_config.TextColumn("เลข PO"),
+                "Product_ID": st.column_config.TextColumn("รหัส"),
+                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f"),
+                "Order_Date": st.column_config.TextColumn("วันที่สั่ง"),
+                "Received_Date": st.column_config.TextColumn("วันที่รับ"),
+            },
+            column_order=["Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"],
+            height=700, use_container_width=True, hide_index=True 
         )
     else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
 
@@ -646,6 +693,9 @@ with tab3:
         for c in ["PO_Number"]:
             if c not in edit_df.columns: edit_df[c] = ""
 
+        # หมายเหตุ: data_editor ไม่รองรับการทำ styling (สีแดง) ภายในเซลล์โดยตรง
+        # หากต้องการสีแดงต้องใช้ st.dataframe แต่จะแก้ไขค่าไม่ได้
+        # ดังนั้นหน้านี้จะคง data_editor ไว้เพื่อให้แก้ไขจุดเตือนได้ตามปกติ
         edited_df = st.data_editor(
             edit_df[final_cols],
             column_config={
