@@ -285,7 +285,7 @@ if not df_sale.empty and 'Date_Only' in df_sale.columns:
 # ==========================================
 # 5. DIALOG FUNCTIONS
 # ==========================================
-@st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
+@st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large") # แก้หัวข้อ Dialog เป็นไทย
 def show_history_dialog(fixed_product_id=None):
     selected_pid = fixed_product_id
     if not selected_pid:
@@ -317,18 +317,20 @@ def show_history_dialog(fixed_product_id=None):
                 st.divider()
                 st.markdown(f"### {selected_pid} : {product_name}")
                 
-                # ✅ Apply Red Color to Negative Numbers & Force Integers
+                # ✅ ปรับหัวตารางเป็นภาษาไทยทั้งหมด
                 st.dataframe(
                     history_df.style.map(highlight_negative), 
                     column_config={
                         "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
                         "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
-                        "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
-                        "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
-                        "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
-                        "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                        "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f ¥"),
-                        "Transport_Type": st.column_config.TextColumn("ขนส่ง"),
+                        "Order_Date": st.column_config.TextColumn("วันที่สั่งซื้อ", width="medium"),
+                        "Received_Date": st.column_config.TextColumn("วันที่ได้รับ", width="medium"),
+                        "Qty_Ordered": st.column_config.NumberColumn("จำนวนสั่ง", format="%d"),
+                        "Qty_Remaining": st.column_config.NumberColumn("ค้างส่ง", format="%d"),
+                        "Total_Yuan": st.column_config.NumberColumn("ยอดรวม (หยวน)", format="%.2f ¥"),
+                        "Transport_Type": st.column_config.TextColumn("ขนส่งทาง"),
+                        "Transport_Weight": st.column_config.TextColumn("รายละเอียด/นน."),
+                        "Yuan_Rate": st.column_config.NumberColumn("เรทเงิน", format="%.2f"),
                     },
                     use_container_width=True, hide_index=True, height=400
                 )
