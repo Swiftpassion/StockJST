@@ -71,13 +71,12 @@ def get_stock_from_sheet():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Mapping Column รวม Min_Limit (จุดเตือน) ด้วย
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'ID': 'Product_ID',
             'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
             'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
             'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock',
-            'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit' # เพิ่มการ map จุดเตือน
+            'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         return df
@@ -174,9 +173,7 @@ def save_po_to_sheet(data_row, row_index=None):
         st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
         return False
 
-# ==========================================
-# 4. ฟังก์ชันอัปเดตค่า Min Limit ลง Master Sheet
-# ==========================================
+# ฟังก์ชันอัปเดตค่า Min Limit (แก้ไขให้รองรับ Filter ไม่ให้ข้อมูลหาย)
 def update_master_limits(df_edited):
     try:
         creds = get_credentials()
@@ -191,17 +188,14 @@ def update_master_limits(df_edited):
         if target_col_name not in headers:
             ws.update_cell(1, len(headers) + 1, target_col_name)
             col_index = len(headers) + 1
-            # ถ้าเพิ่งสร้างคอลัมน์ใหม่ ต้องดึงข้อมูลใหม่เพื่อให้แน่ใจว่า structure ถูกต้อง
             time.sleep(1) 
         else:
             col_index = headers.index(target_col_name) + 1
             
         # 2. อ่านข้อมูล Master ปัจจุบัน
-        # ใช้ get_all_values แทน get_all_records เพื่อความชัวร์เรื่อง header
         all_rows = ws.get_all_values()
-        if len(all_rows) < 2: return # ไม่มีข้อมูล
+        if len(all_rows) < 2: return
         
-        # Mapping Column Index ของ Product_ID และ Min_Limit ใน Sheet จริง
         header_row = all_rows[0]
         try:
             pid_idx = -1
@@ -211,13 +205,12 @@ def update_master_limits(df_edited):
                     break
             if pid_idx == -1: raise Exception("หาคอลัมน์รหัสสินค้าไม่เจอ")
             
-            # map ของใหม่ {Product_ID: New_Limit}
+            # map ของใหม่จากหน้าเว็บ
             limit_map = df_edited.set_index('Product_ID')['Min_Limit'].to_dict()
             
-            # 3. เตรียมข้อมูล Update (เริ่มจากแถว 2)
+            # 3. เตรียมข้อมูล Update
             values_to_update = []
             
-            # วนลูปดูข้อมูลเดิมใน Sheet ทีละแถว
             for row in all_rows[1:]: # ข้าม Header
                 if len(row) <= pid_idx: 
                     values_to_update.append([10])
@@ -225,14 +218,13 @@ def update_master_limits(df_edited):
                     
                 pid = str(row[pid_idx])
                 
-                # หาค่าเดิมใน Sheet (เผื่อมีอยู่แล้ว)
+                # หาค่าเดิม
                 old_val = 10
                 if len(row) >= col_index:
                     try: old_val = int(row[col_index-1])
                     except: old_val = 10
                 
-                # ถ้าสินค้าตัวนี้ มีการแก้ไขในหน้าเว็บ (อยู่ใน limit_map) ให้ใช้ค่าใหม่
-                # ถ้าไม่มี (โดน Filter ซ่อนอยู่) ให้ใช้ค่าเดิม (old_val) ห้ามรีเซ็ต!
+                # ถ้ามีใน map (หน้าเว็บ) ให้ใช้ค่าใหม่ ถ้าไม่มีให้ใช้ค่าเดิม
                 if pid in limit_map:
                     val = limit_map[pid]
                     values_to_update.append([int(val)])
@@ -254,7 +246,7 @@ def update_master_limits(df_edited):
         st.error(f"❌ บันทึกจุดเตือนไม่สำเร็จ: {e}")
 
 # ==========================================
-# 5. Main App & Data Loading
+# 4. Main App & Data Loading
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
@@ -268,13 +260,12 @@ with st.spinner('กำลังโหลดข้อมูล...'):
     df_po = get_po_data()
     df_sale = get_sale_from_folder()
     
-    # Clean Product IDs
     if not df_master.empty and 'Product_ID' in df_master.columns: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
     if not df_po.empty and 'Product_ID' in df_po.columns: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
     if not df_sale.empty and 'Product_ID' in df_sale.columns: df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
 
 # ==========================================
-# 6. DIALOG FUNCTIONS (แก้ไขให้เสถียร)
+# 5. DIALOG FUNCTIONS
 # ==========================================
 @st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
 def show_history_dialog(fixed_product_id=None):
@@ -286,7 +277,6 @@ def show_history_dialog(fixed_product_id=None):
             return
         if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
             product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-            # Key ต้อง Unique
             selected_product = st.selectbox("🔍 ค้นหาสินค้า", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...", key="hist_search_box")
             if selected_product: selected_pid = selected_product.split(" : ")[0]
     
@@ -330,8 +320,6 @@ def po_form_dialog(mode="add"):
     else: st.subheader("✏️ แก้ไขรายการ")
     d = {}
     sheet_row_index = None
-    
-    # ใช้ Key prefix เพื่อแยก ID ของ Widget ไม่ให้ชนกัน
     kp = f"d_{mode}"
 
     if mode == "search":
@@ -426,9 +414,13 @@ def po_form_dialog(mode="add"):
                             st.success("✅ บันทึกเรียบร้อย!"); time.sleep(1); st.rerun()
 
 # ==========================================
-# 7. TABS & UI LOGIC
+# 6. TABS & UI LOGIC
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📅 สรุปยอดขายรายวัน", "📝 รายการสั่งซื้อ", "📈 รายงาน Stock"])
+
+# ตัวแปรสำหรับควบคุมการเปิด Dialog (ป้องกันการเปิดซ้อนกัน)
+dialog_action = None 
+dialog_data = None
 
 # ==========================================
 # TAB 1: Daily Sales Report
@@ -496,7 +488,6 @@ with tab1:
 
                     final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - all_time_sold.get(x, 0))
                     
-                    # Status logic แบบง่ายสำหรับหน้า Sale (ถ้าอยากได้ละเอียดต้องดึง Min Limit มา)
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                     
                     fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
@@ -522,8 +513,9 @@ with tab1:
                     
                     if event.selection and event.selection["rows"]:
                         selected_idx = event.selection["rows"][0]
-                        selected_pid = final_df.iloc[selected_idx]['Product_ID']
-                        show_history_dialog(fixed_product_id=selected_pid)
+                        dialog_data = final_df.iloc[selected_idx]['Product_ID']
+                        dialog_action = "history"
+
                 else: st.warning("⚠️ ไม่พบยอดขายในช่วงเวลาที่เลือก")
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
@@ -536,9 +528,11 @@ with tab2:
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): po_form_dialog(mode="add")
+            if st.button("➕ เพิ่ม PO ใหม่", type="primary", key="btn_add_po_tab2"): 
+                dialog_action = "po_add"
         with b2:
-            if st.button("🔍 ค้นหา & แก้ไข", type="secondary"): po_form_dialog(mode="search")
+            if st.button("🔍 ค้นหา & แก้ไข", type="secondary", key="btn_search_po_tab2"): 
+                dialog_action = "po_search"
 
     if not df_po.empty and 'Product_ID' in df_po.columns and not df_master.empty:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
@@ -557,7 +551,7 @@ with tab3:
     st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
     
     if not df_master.empty and 'Product_ID' in df_master.columns:
-        # --- 1. เตรียมข้อมูล (Data Preparation) ---
+        # --- 1. เตรียมข้อมูล ---
         df_po_latest = pd.DataFrame()
         if not df_po.empty and 'Product_ID' in df_po.columns:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
@@ -571,14 +565,17 @@ with tab3:
         
         df_stock_report['Qty_Sold'] = df_stock_report['Product_ID'].map(sales_map).fillna(0)
         if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
+        
+        for col in ['Qty_Ordered', 'Initial_Stock', 'Qty_Sold']:
+            if col in df_stock_report.columns:
+                df_stock_report[col] = pd.to_numeric(df_stock_report[col], errors='coerce').fillna(0)
+        
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Qty_Sold']
 
-        # เตรียม Min Limit
         if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
         else: df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(10)
 
-        # --- 2. คำนวณสถานะ (Calculate Status) ---
-        # ต้องคำนวณก่อน Filter เพื่อให้สถานะถูกต้อง
+        # --- 2. คำนวณสถานะ ---
         def calc_status(row):
             if row['Current_Stock'] <= 0: return "🔴 หมดเกลี้ยง"
             elif row['Current_Stock'] < row['Min_Limit']: return "⚠️ ใกล้หมด"
@@ -586,80 +583,77 @@ with tab3:
             
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
-        # --- 3. ส่วนควบคุม (Filters & Search) ---
+        # --- 3. ส่วนควบคุม (Filters) ---
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
             
             with col_filter:
-                # ตัวเลือก Filter
                 status_options = ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"]
-                selected_status = st.multiselect(
-                    "ตัวกรองสถานะ (เลือกได้หลายอัน)",
-                    options=status_options,
-                    default=[], # ค่าเริ่มต้นว่าง = แสดงทั้งหมด
-                    placeholder="📦 แสดงทั้งหมด (หรือเลือกสถานะที่ต้องการ)"
-                )
+                selected_status = st.multiselect("ตัวกรองสถานะ", options=status_options, default=[], placeholder="📦 แสดงทั้งหมด")
             
             with col_search:
                 search_text = st.text_input("🔍 ค้นหา (ชื่อสินค้า / รหัส)", value="", placeholder="พิมพ์ชื่อหรือรหัส...")
             
             with col_reset:
-                st.write("") # ดันปุ่มลงมา
-                st.write("")
-                if st.button("❌ ล้าง", use_container_width=True):
-                    st.rerun()
+                st.write(""); st.write("")
+                if st.button("❌ ล้าง", use_container_width=True): st.rerun()
 
-        # --- 4. กรองข้อมูล (Apply Filters) ---
+        # --- 4. กรองข้อมูล ---
         edit_df = df_stock_report.copy()
         
-        # 4.1 กรองตามสถานะ
         if selected_status:
             edit_df = edit_df[edit_df['Status'].isin(selected_status)]
             
-        # 4.2 กรองตามคำค้นหา
         if search_text:
             search_text = search_text.lower()
-            mask = (
-                edit_df['Product_Name'].astype(str).str.lower().str.contains(search_text) | 
-                edit_df['Product_ID'].astype(str).str.lower().str.contains(search_text)
-            )
+            mask = (edit_df['Product_Name'].astype(str).str.lower().str.contains(search_text) | 
+                    edit_df['Product_ID'].astype(str).str.lower().str.contains(search_text))
             edit_df = edit_df[mask]
 
-        # --- 5. Tips & Save Button ---
+        # --- 5. Tips & Save ---
         col_ctrl1, col_ctrl2 = st.columns([3, 1])
         with col_ctrl1:
             st.info("💡 Tips: คลิกที่ตัวเลขในช่อง '🔔 จุดเตือน' ใส่เลขยอดแค่เลขเดียวเป็นเลขที่แสดงว่าสินค้าใกล้หมดแล้ว ถ้าจำนวนสินค้าคงเหลือน้อยกว่ายอดที่ระบุ จะเปลี่ยนสถานะเป็น ⚠️ ใกล้หมด")
         with col_ctrl2:
-             # ปุ่มบันทึก
              if st.button("💾 บันทึกค่าที่ตั้งไว้", type="primary", use_container_width=True):
                  if "edited_stock_data" in st.session_state:
-                     # ส่งข้อมูลที่แก้ไขไปบันทึก (ฟังก์ชันใหม่จะจัดการเรื่องข้อมูลที่ถูกซ่อนให้เอง)
                      update_master_limits(st.session_state.edited_stock_data)
                      st.rerun()
 
-        # --- 6. แสดงตาราง (Interactive Table) ---
-        final_cols = ["Product_ID", "Image", "Product_Name", "Status", "Min_Limit", "Current_Stock", "Qty_Sold", "PO_Number"]
+        # --- 6. แสดงตาราง ---
+        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Qty_Sold", "Qty_Ordered", "Order_Date", "Received_Date", "PO_Number", "Status", "Min_Limit"]
         
+        for c in ["Order_Date", "Received_Date", "PO_Number"]:
+            if c not in edit_df.columns: edit_df[c] = ""
+
         edited_df = st.data_editor(
             edit_df[final_cols],
             column_config={
                 "Product_ID": st.column_config.TextColumn("รหัส", disabled=True, width=80),
                 "Image": st.column_config.ImageColumn("รูป", width=60),
                 "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", disabled=True, width=200),
-                "Status": st.column_config.TextColumn("สถานะ (Auto)", disabled=True, width=110),
-                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน (แก้ไขได้)", min_value=0, step=1, help="ใส่เลขเพื่อกำหนดจุดเตือน", width=120),
-                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", disabled=True, format="%d", width=80),
-                "Qty_Sold": st.column_config.NumberColumn("ขายไป", disabled=True, format="%d"),
-                "PO_Number": st.column_config.TextColumn("PO ล่าสุด", disabled=True),
+                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", disabled=True, format="%d", width=70),
+                "Qty_Sold": st.column_config.NumberColumn("ขายไป", disabled=True, format="%d", width=70),
+                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", disabled=True, format="%d", width=70),
+                "Order_Date": st.column_config.TextColumn("วันที่สั่งซื้อ", disabled=True, width=100),
+                "Received_Date": st.column_config.TextColumn("ของมา", disabled=True, width=100),
+                "PO_Number": st.column_config.TextColumn("PO ล่าสุด", disabled=True, width=100),
+                "Status": st.column_config.TextColumn("สถานะ Auto", disabled=True, width=110),
+                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0, step=1, help="ใส่เลขเพื่อกำหนดจุดเตือน", width=130),
             },
-            height=600,
-            use_container_width=True,
-            hide_index=True,
-            key="edited_stock_data"
+            height=600, use_container_width=True, hide_index=True, key="edited_stock_data"
         )
-        
-        # Footer Stat
         st.markdown(f"**แสดงผล:** {len(edited_df)} รายการ (จากทั้งหมด {len(df_stock_report)}) | **สินค้าต้องเติม (⚠️+🔴):** {len(df_stock_report[df_stock_report['Status']!='🟢 มีของ'])}")
         
     else:
         st.warning("ไม่พบข้อมูล Master Product")
+
+# ==========================================
+# 🛑 EXECUTE DIALOGS (ทำงานตอนท้ายสุดเพื่อป้องกัน Error)
+# ==========================================
+if dialog_action == "po_add":
+    po_form_dialog(mode="add")
+elif dialog_action == "po_search":
+    po_form_dialog(mode="search")
+elif dialog_action == "history" and dialog_data:
+    show_history_dialog(fixed_product_id=dialog_data)
