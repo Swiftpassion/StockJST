@@ -60,13 +60,47 @@ def get_credentials():
 # ==========================================
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
+
+@st.cache_data(ttl=300)
+def get_stock_from_sheet():
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_STOCK)
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def get_po_data():
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_PO)
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        
+        # เพิ่ม Index แถวสำหรับใช้อ้างอิงตอนแก้ไข
+        if not df.empty:
+            df['Sheet_Row_Index'] = range(2, len(df) + 2)
+            
+        return df
+    except Exception as e:
+        st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
+        return pd.DataFrame()
+
 @st.cache_data(ttl=300)
 def get_sale_from_folder():
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
         
-        # 1. เปลี่ยน pageSize เป็น 100 เพื่อดึงมาหลายไฟล์
+        # 1. อ่านไฟล์ทั้งหมด (pageSize=100)
         results = service.files().list(
             q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false",
             orderBy='modifiedTime desc', pageSize=100, fields="files(id, name)").execute()
@@ -82,7 +116,7 @@ def get_sale_from_folder():
                 file_id = item['id']
                 file_name = item['name']
                 
-                # ข้ามไฟล์ที่ไม่ใช่ Excel (เผื่อมีไฟล์ขยะ)
+                # ข้ามไฟล์ที่ไม่ใช่ Excel
                 if not file_name.endswith(('.xlsx', '.xls')):
                     continue
 
@@ -96,7 +130,7 @@ def get_sale_from_folder():
                 # อ่านไฟล์
                 temp_df = pd.read_excel(fh)
                 
-                # Mapping Columns (ทำเหมือนเดิมแต่ทำทุกไฟล์)
+                # Mapping Columns
                 col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
                 temp_df = temp_df.rename(columns={k:v for k,v in col_map.items() if k in temp_df.columns})
                 
@@ -116,7 +150,7 @@ def get_sale_from_folder():
                 st.warning(f"⚠️ อ่านไฟล์ {item['name']} ไม่สำเร็จ: {file_err}")
                 continue
 
-        # 3. รวมทุกไฟล์เข้าด้วยกัน (Concatenate)
+        # 3. รวมทุกไฟล์เข้าด้วยกัน
         if all_dfs:
             final_df = pd.concat(all_dfs, ignore_index=True)
             return final_df
@@ -154,43 +188,6 @@ def save_po_to_sheet(data_row, row_index=None):
         st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
         return False
 
-@st.cache_data(ttl=300)
-def get_sale_from_folder():
-    try:
-        creds = get_credentials()
-        service = build('drive', 'v3', credentials=creds)
-        results = service.files().list(
-            q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false",
-            orderBy='modifiedTime desc', pageSize=1, fields="files(id, name)").execute()
-        items = results.get('files', [])
-        if not items: return pd.DataFrame()
-        file_id = items[0]['id']
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False: status, done = downloader.next_chunk()
-        fh.seek(0)
-        df = pd.read_excel(fh)
-        
-        # Mapping Columns
-        col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
-        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
-        
-        if 'Qty_Sold' in df.columns: df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
-        
-        # เพิ่มการแปลงวันที่สำหรับการกรอง
-        if 'Order_Time' in df.columns:
-            # แปลงเป็น datetime object
-            df['Order_Time'] = pd.to_datetime(df['Order_Time'], errors='coerce')
-            # สร้าง column Date ล้วนๆ ไว้กรอง
-            df['Date_Only'] = df['Order_Time'].dt.date
-            
-        return df
-    except Exception as e:
-        st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
-        return pd.DataFrame()
-
 # ==========================================
 # 4. Main App Structure & Data Loading
 # ==========================================
@@ -222,7 +219,6 @@ def show_history_dialog(fixed_product_id=None):
     Shows history. 
     If fixed_product_id is provided, it skips the search box and shows that product directly.
     """
-    
     selected_pid = fixed_product_id
     
     # กรณีไม่มีการส่งค่ามา (กดจากปุ่มทั่วไป) ให้แสดง Search Box
