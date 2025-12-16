@@ -246,9 +246,8 @@ def po_form_dialog(mode="add"):
             st.warning("ยังไม่มีข้อมูล PO")
             return
 
-    # --- ฟังก์ชันล้างข้อมูล (Reset Callback) ---
+    # --- ฟังก์ชันล้างข้อมูล (Reset Callback - ใช้เฉพาะโหมด Add) ---
     def clear_form_data():
-        # ตั้งค่าเริ่มต้นให้เป็น None ทั้งหมด เพื่อให้ช่องกรอกว่างเปล่า
         keys_to_reset = {
             "add_po_num": "",
             "add_order_date": date.today(),
@@ -263,15 +262,19 @@ def po_form_dialog(mode="add"):
             "add_p_1688_ship": None,
             "add_p_shopee": None,
             "add_p_tiktok": None,
-            # ไม่รีเซ็ต transport
             "add_total_yuan": None
         }
         for k, v in keys_to_reset.items():
             st.session_state[k] = v
 
-    # --- เตรียมข้อมูลสำหรับการแสดงผล ---
-    key_prefix = "add" if mode == "add" else "search"
-    
+    # --- กำหนด Key Prefix ---
+    # ถ้าเป็น Search ให้ Key เปลี่ยนไปตาม ID ของ Row นั้นๆ เพื่อบังคับให้ Widget รีเฟรชค่าใหม่เสมอ
+    if mode == "search" and sheet_row_index:
+        key_prefix = f"search_{sheet_row_index}"
+    else:
+        key_prefix = "add"
+
+    # --- Prepare Data ---
     st.markdown("##### 1. ค้นหารหัสสินค้า")
     product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
     default_idx = None
@@ -305,12 +308,20 @@ def po_form_dialog(mode="add"):
                 try: return datetime.strptime(str(val), "%Y-%m-%d").date()
                 except: return None
             
+            # Helper: ดึงค่า Text
             def v(k): return d.get(k) if mode == "search" else None
-            # vn จะคืนค่า None ถ้าเป็น 0 หรือว่างเปล่า ทำให้ช่อง input ว่าง
+
+            # Helper: ดึงค่า Numeric (แยก Logic Add/Search)
             def vn(k): 
                 val = d.get(k)
-                try: return float(val) if val and float(val)!=0 else None
-                except: return None
+                if mode == "search":
+                    # โหมดแก้ไข: ถ้ามีค่า (แม้จะเป็น 0) ให้คืนค่า float, ถ้าไม่มีคืน 0.0
+                    try: return float(val) if val is not None and str(val).strip() != "" else 0.0
+                    except: return 0.0
+                else:
+                    # โหมดเพิ่ม: ถ้าเป็น 0 หรือว่าง ให้คืน None (เพื่อให้ช่องว่าง)
+                    try: return float(val) if val and float(val)!=0 else None
+                    except: return None
 
             r1c1, r1c2, r1c3 = st.columns(3)
             po_num = r1c1.text_input("เลข PO *", value=v("PO_Number"), placeholder="ระบุเลข PO", key=f"{key_prefix}_po_num")
