@@ -263,7 +263,7 @@ def po_form_dialog(mode="add"):
             "add_p_1688_ship": 0.0,
             "add_p_shopee": 0.0,
             "add_p_tiktok": 0.0,
-            "add_transport": 0, # Index 0
+            # ตัดบรรทัด add_transport ออก เพื่อไม่ให้เกิด Error และคงค่าเดิมไว้
             "add_total_yuan": 0.0
         }
         for k, v in keys_to_reset.items():
