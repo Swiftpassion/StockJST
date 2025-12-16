@@ -326,7 +326,7 @@ def show_history_dialog(fixed_product_id=None):
                         "Order_Date": st.column_config.TextColumn("วันที่สั่งซื้อ", width="medium"),
                         "Received_Date": st.column_config.TextColumn("วันที่ได้รับ", width="medium"),
                         "Qty_Ordered": st.column_config.NumberColumn("จำนวนสั่ง", format="%d"),
-                        "Qty_Remaining": st.column_config.NumberColumn("ค้างส่ง", format="%d"),
+                        "Qty_Remaining": st.column_config.NumberColumn("คงเหลือ", format="%d"),
                         "Transport_Type": st.column_config.TextColumn("ขนส่งทาง"),
                         "Transport_Weight": st.column_config.TextColumn("รายละเอียด/นน."),
                         "Yuan_Rate": st.column_config.NumberColumn("เรทเงิน", format="%.2f"),
