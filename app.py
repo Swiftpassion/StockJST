@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import json
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -135,10 +135,11 @@ def get_po_data():
         try:
             ws = sh.worksheet(TAB_NAME_PO)
             data = ws.get_all_records()
+            # [แก้ไข] เพิ่ม Wait_Date ใน Columns List
             columns = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
                        "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
                        "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
-                       "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type"]
+                       "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Wait_Date"]
             if not data:
                  return pd.DataFrame(columns=columns)
             df = pd.DataFrame(data)
@@ -161,11 +162,14 @@ def save_po_to_sheet(data_row, row_index=None):
         for item in data_row:
             if isinstance(item, (date, datetime)):
                 formatted_row.append(item.strftime("%Y-%m-%d"))
+            elif item is None:
+                formatted_row.append("")
             else:
                 formatted_row.append(item)
                 
         if row_index:
-            range_name = f"A{row_index}:P{row_index}" 
+            # [แก้ไข] เปลี่ยน Range จาก P เป็น Q เพื่อรองรับ Wait_Date
+            range_name = f"A{row_index}:Q{row_index}" 
             ws.update(range_name, [formatted_row])
         else:
             ws.append_row(formatted_row)
@@ -241,7 +245,10 @@ def show_history_dialog():
 
     if selected_product:
         selected_pid = selected_product.split(" : ")[0]
+        # [แก้ไข] สร้าง copy และ drop Sheet_Row_Index เพื่อไม่ให้แสดงในตาราง
         history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
+        if 'Sheet_Row_Index' in history_df.columns:
+            history_df = history_df.drop(columns=['Sheet_Row_Index'])
         
         if not history_df.empty:
             if 'Order_Date' in history_df.columns:
@@ -252,12 +259,14 @@ def show_history_dialog():
             st.divider()
             st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
             
+            # [แก้ไข] เพิ่ม Wait_Date ลงใน config และจัดลำดับ
             st.dataframe(
                 history_df,
                 column_config={
                     "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
                     "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
                     "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
+                    "Wait_Date": st.column_config.NumberColumn("จำนวนวันที่รอสินค้า", format="%d วัน", width="small"), # เพิ่มช่องนี้
                     "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
                     "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
                     "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
@@ -359,6 +368,7 @@ def po_form_dialog(mode="add"):
                 def_recv_date = get_date_val(d.get("Received_Date"))
                 
                 order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date)
+                # [แก้ไข] ช่อง "ของมา" สามารถปล่อยว่างได้ (value=None)
                 recv_date = r1c3.date_input("ของมา (ประมาณ)", value=def_recv_date)
                 
                 weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight", ""), height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
@@ -390,9 +400,7 @@ def po_form_dialog(mode="add"):
                 if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
                 transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
                 
-                # --- [แก้ไข] ไม่มีการคำนวณ Auto และใส่เป็น Placeholder เมื่อเป็น 0 ---
                 saved_total = val_num("Total_Yuan", default=0.0)
-                # ถ้ามีค่าเดิม (มากกว่า 0) ให้ใส่ค่านั้น ถ้าไม่มี (เป็น 0) ให้เป็น None เพื่อแสดง Placeholder
                 input_val_total = float(saved_total) if saved_total > 0 else None
 
                 st.markdown("---")
@@ -415,14 +423,20 @@ def po_form_dialog(mode="add"):
                     
                     if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                     else:
+                        # [แก้ไข] คำนวณ Wait_Date (จำนวนวันที่รอสินค้า)
+                        wait_days = ""
+                        if order_date and recv_date:
+                            wait_days = (recv_date - order_date).days
+                        
+                        # [แก้ไข] เพิ่ม wait_days ลงใน List ข้อมูลที่จะบันทึก
                         new_row = [
                             master_pid, po_num, order_date, recv_date, weight_txt, 
                             qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
                             p_1688_noship or 0, p_1688_ship or 0, total_yuan_input or 0, 
-                            p_shopee or 0, p_tiktok or 0, fees or 0, transport
+                            p_shopee or 0, p_tiktok or 0, fees or 0, transport,
+                            wait_days
                         ]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
-                            # [แก้ไข] ไม่ใช้ st.rerun() เพื่อป้องกันการเด้งกลับหน้าแรก
                             st.success("✅ บันทึกเรียบร้อย! ข้อมูลถูกส่งไปที่ Google Sheet แล้ว")
                             st.caption("(คุณสามารถปิดหน้าต่างนี้ หรือแก้ไขข้อมูลต่อได้เลย)")
 
