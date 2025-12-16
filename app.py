@@ -248,23 +248,23 @@ def po_form_dialog(mode="add"):
 
     # --- ฟังก์ชันล้างข้อมูล (Reset Callback) ---
     def clear_form_data():
-        # กำหนดค่าเริ่มต้นให้กับทุก Key ที่ใช้ใน Input เพื่อบังคับล้างค่า
+        # ตั้งค่าเริ่มต้นให้เป็น None ทั้งหมด เพื่อให้ช่องกรอกว่างเปล่า
         keys_to_reset = {
             "add_po_num": "",
             "add_order_date": date.today(),
             "add_recv_date": None,
             "add_weight": "",
-            "add_qty_ord": 0.0,
-            "add_qty_rem": 0.0,
-            "add_yuan_rate": 0.0,
-            "add_fees": 0.0,
-            "add_p_novat": 0.0,
-            "add_p_1688_no": 0.0,
-            "add_p_1688_ship": 0.0,
-            "add_p_shopee": 0.0,
-            "add_p_tiktok": 0.0,
-            # ตัดบรรทัด add_transport ออก เพื่อไม่ให้เกิด Error และคงค่าเดิมไว้
-            "add_total_yuan": 0.0
+            "add_qty_ord": None,
+            "add_qty_rem": None,
+            "add_yuan_rate": None,
+            "add_fees": None,
+            "add_p_novat": None,
+            "add_p_1688_no": None,
+            "add_p_1688_ship": None,
+            "add_p_shopee": None,
+            "add_p_tiktok": None,
+            # ไม่รีเซ็ต transport
+            "add_total_yuan": None
         }
         for k, v in keys_to_reset.items():
             st.session_state[k] = v
@@ -299,7 +299,6 @@ def po_form_dialog(mode="add"):
             if master_name: st.caption(f"{master_name}")
         
         with col_right_form:
-            # หมายเหตุ: นำ st.form ออก เพื่อให้ปุ่ม Reset ทำงานได้ทันที
             st.markdown("###### 📄 ข้อมูลทั่วไป")
             def get_date_val(val):
                 if not val or val == "" or val == "nan": return None
@@ -307,6 +306,7 @@ def po_form_dialog(mode="add"):
                 except: return None
             
             def v(k): return d.get(k) if mode == "search" else None
+            # vn จะคืนค่า None ถ้าเป็น 0 หรือว่างเปล่า ทำให้ช่อง input ว่าง
             def vn(k): 
                 val = d.get(k)
                 try: return float(val) if val and float(val)!=0 else None
@@ -372,6 +372,7 @@ def po_form_dialog(mode="add"):
                         wait_days = ""
                         if order_date and recv_date: wait_days = (recv_date - order_date).days
                         
+                        # ใช้ (val or 0) เพื่อแปลง None เป็น 0 ก่อนบันทึก
                         new_row = [
                             master_pid, po_num, order_date, recv_date, weight_txt, 
                             qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
@@ -380,7 +381,6 @@ def po_form_dialog(mode="add"):
                         ]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
                             st.success("✅ บันทึกเรียบร้อย!")
-                            # ไม่ต้อง Rerun เพื่อให้ผู้ใช้เห็นข้อความ Success
 
 # ==========================================
 # 6. TABS & UI LOGIC
