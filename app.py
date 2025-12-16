@@ -219,10 +219,10 @@ with st.spinner('กำลังโหลดข้อมูล...'):
     if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
 
 # ==========================================
-# 5. DIALOG FUNCTIONS (MOVED HERE TO FIX RELOAD ISSUE)
+# 5. DIALOG FUNCTIONS
 # ==========================================
 
-# --- Dialog 1: ประวัติการสั่งซื้อ (สำหรับ Tab 1) ---
+# --- Dialog 1: ประวัติการสั่งซื้อ ---
 @st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
 def show_history_dialog():
     st.caption("ค้นหาและเลือกสินค้าเพื่อดูประวัติการสั่งซื้อทั้งหมด")
@@ -279,7 +279,7 @@ def show_history_dialog():
         else:
             st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
 
-# --- Dialog 2: จัดการ PO (สำหรับ Tab 2) ---
+# --- Dialog 2: จัดการ PO ---
 @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
 def po_form_dialog(mode="add"):
     d = {}
@@ -390,15 +390,21 @@ def po_form_dialog(mode="add"):
                 if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
                 transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
                 
-                calc_guide = (qty_ord or 0) * (p_1688_ship or 0)
+                # --- [EDITED] Logic for Auto-Calculation in Input Field ---
+                # 1. คำนวณยอดรวม (Qty * Price_Ship)
+                calc_total = (qty_ord or 0) * (p_1688_ship or 0)
                 
+                # 2. เช็คว่ามีค่าเดิมจาก Database หรือไม่ (กรณีแก้ไข)
+                saved_total = val_num("Total_Yuan", default=0.0)
+
+                # 3. ถ้ามีค่าเดิมที่มากกว่า 0 ให้ใช้ค่าเดิม / ถ้าไม่มี (หรือเป็น 0) ให้ใช้ค่าที่คำนวณใหม่
+                display_total_value = saved_total if saved_total > 0 else calc_total
+
                 st.markdown("---")
                 f_col1, f_col2 = st.columns([2, 1])
                 with f_col1:
-                    st.caption(f"💡 ระบบคำนวณแนะนำ: {calc_guide:,.2f}")
-                    initial_total = val_num("Total_Yuan")
-                    if initial_total is None: initial_total = calc_guide if calc_guide > 0 else None
-                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=initial_total, placeholder="0.00")
+                    # ใส่ค่าที่คำนวณได้ลงไปใน value ของช่อง Input โดยตรงเลย
+                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=display_total_value, placeholder="0.00")
 
                 with f_col2:
                     st.write(""); st.write("")
@@ -431,7 +437,7 @@ def po_form_dialog(mode="add"):
 tab1, tab2 = st.tabs(["📈 รายงาน Stock", "📝 รายการสั่งซื้อ"])
 
 # ==========================================
-# TAB 1: Stock Report (MASTER BASED)
+# TAB 1: Stock Report
 # ==========================================
 with tab1:
     if not df_master.empty:
@@ -491,7 +497,7 @@ with tab1:
         with col_b2:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             if st.button("📜 ดูประวัติ", type="secondary"): 
-                show_history_dialog() # Calling global dialog
+                show_history_dialog()
         with col_b3:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
@@ -579,10 +585,10 @@ with tab2:
         b1, b2 = st.columns(2)
         with b1:
             if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
-                po_form_dialog(mode="add") # Calling global dialog
+                po_form_dialog(mode="add")
         with b2:
             if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): 
-                po_form_dialog(mode="search") # Calling global dialog
+                po_form_dialog(mode="search")
 
     if not df_po.empty:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
