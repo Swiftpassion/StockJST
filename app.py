@@ -322,13 +322,28 @@ def po_form_dialog(mode="add"):
     sheet_row_index = None
     kp = f"d_{mode}"
 
+    # ตัวแปรสำหรับสร้าง Key ให้ไม่ซ้ำกันตามรายการที่เลือก (แก้ปัญหาข้อมูลไม่ขึ้น)
+    selected_suffix = "" 
+
     if mode == "search":
         st.markdown("### 🔍 ค้นหา PO")
         if not df_po.empty: 
+            # สร้างตัวเลือก
             po_map = {f"{row['PO_Number']} (สินค้า: {row['Product_ID']})": row for _, row in df_po.iterrows()}
-            selected_key = st.selectbox("เลือกรายการ PO", options=list(po_map.keys()), index=None, placeholder="พิมพ์เพื่อค้นหา PO...", key=f"{kp}_sel")
+            
+            selected_key = st.selectbox(
+                "เลือกรายการ PO", 
+                options=list(po_map.keys()), 
+                index=None, 
+                placeholder="พิมพ์เพื่อค้นหา PO...", 
+                key=f"{kp}_sel"
+            )
+            
             if selected_key:
                 d = po_map[selected_key].to_dict()
+                # สร้าง Suffix ตามรายการที่เลือก เพื่อบังคับให้ Input รีเซ็ตค่าใหม่
+                selected_suffix = f"_{selected_key}" 
+                
                 if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
                 else: 
                     match_row = df_po[(df_po['PO_Number']==d['PO_Number']) & (df_po['Product_ID']==d['Product_ID'])]
@@ -337,16 +352,35 @@ def po_form_dialog(mode="add"):
             st.warning("ยังไม่มีข้อมูล PO"); return
 
     def clear_form_data():
-        keys = ["add_po_num", "add_weight", "add_qty_ord", "add_qty_rem", "add_yuan_rate", "add_fees", "add_p_novat", "add_p_1688_no", "add_p_1688_ship", "add_p_shopee", "add_p_tiktok", "add_total_yuan"]
-        for k in keys: st.session_state[k] = None
+        # แก้ไขให้ล้างค่าได้ถูกต้องทั้งโหมด Add และ Search
+        keys_to_clear = [
+            f"{kp}_po{selected_suffix}", f"{kp}_w{selected_suffix}", 
+            f"{kp}_qord{selected_suffix}", f"{kp}_qrem{selected_suffix}", 
+            f"{kp}_rate{selected_suffix}", f"{kp}_fee{selected_suffix}", 
+            f"{kp}_pnov{selected_suffix}", f"{kp}_p1688n{selected_suffix}", 
+            f"{kp}_p1688s{selected_suffix}", f"{kp}_pshop{selected_suffix}", 
+            f"{kp}_ptik{selected_suffix}", f"{kp}_toty{selected_suffix}"
+        ]
+        for k in keys_to_clear:
+            if k in st.session_state: st.session_state[k] = None
 
+    # ส่วนเลือกสินค้า (Product Select)
     if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         default_idx = None
         if mode == "search" and "Product_ID" in d:
              matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]) + " :")]
              if matches: default_idx = matches[0]
-        selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed", key=f"{kp}_prod")
+        
+        # Key ของ Product Select ก็ต้องเปลี่ยนตามด้วย
+        selected_option = st.selectbox(
+            "ระบุสินค้า", 
+            product_options, 
+            index=default_idx, 
+            placeholder="🔍 Search...", 
+            label_visibility="collapsed", 
+            key=f"{kp}_prod{selected_suffix}"
+        )
     else: selected_option = None
     
     master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
@@ -374,37 +408,38 @@ def po_form_dialog(mode="add"):
                 if mode == "search": return float(val) if val is not None and str(val).strip() != "" else 0.0
                 else: return float(val) if val and float(val)!=0 else None
 
+            # ✅ เพิ่ม selected_suffix เข้าไปใน Key ของทุก Input
             r1c1, r1c2, r1c3 = st.columns(3)
-            po_num = r1c1.text_input("เลข PO *", value=d.get("PO_Number") if mode=="search" else None, key=f"{kp}_po")
-            order_date = r1c2.date_input("วันที่สั่ง", value=get_date_val(d.get("Order_Date")) if mode=="search" else date.today(), key=f"{kp}_odate")
-            recv_date = r1c3.date_input("ของมา (ประมาณ)", value=get_date_val(d.get("Received_Date")), key=f"{kp}_rdate")
-            weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight") if mode=="search" else None, height=100, key=f"{kp}_w")
+            po_num = r1c1.text_input("เลข PO *", value=d.get("PO_Number") if mode=="search" else None, key=f"{kp}_po{selected_suffix}")
+            order_date = r1c2.date_input("วันที่สั่ง", value=get_date_val(d.get("Order_Date")) if mode=="search" else date.today(), key=f"{kp}_odate{selected_suffix}")
+            recv_date = r1c3.date_input("ของมา (ประมาณ)", value=get_date_val(d.get("Received_Date")), key=f"{kp}_rdate{selected_suffix}")
+            weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight") if mode=="search" else None, height=100, key=f"{kp}_w{selected_suffix}")
             
             r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-            qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{kp}_qord") 
-            qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{kp}_qrem")
-            yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{kp}_rate")
-            fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{kp}_fee")
+            qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{kp}_qord{selected_suffix}") 
+            qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{kp}_qrem{selected_suffix}")
+            yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{kp}_rate{selected_suffix}")
+            fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{kp}_fee{selected_suffix}")
             
             r4c1, r4c2, r4c3 = st.columns(3)
-            p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_Unit_NoVAT"), key=f"{kp}_pnov")
-            p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_NoShip"), key=f"{kp}_p1688n")
-            p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_WithShip"), key=f"{kp}_p1688s")
+            p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_Unit_NoVAT"), key=f"{kp}_pnov{selected_suffix}")
+            p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_NoShip"), key=f"{kp}_p1688n{selected_suffix}")
+            p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_WithShip"), key=f"{kp}_p1688s{selected_suffix}")
 
             r5c1, r5c2, r5c3 = st.columns(3)
-            p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=vn("Shopee_Price"), key=f"{kp}_pshop")
-            p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=vn("TikTok_Price"), key=f"{kp}_ptik")
-            transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=1 if d.get("Transport_Type") == "ส่งทางเรือ 🚢" else 0, key=f"{kp}_trans")
+            p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=vn("Shopee_Price"), key=f"{kp}_pshop{selected_suffix}")
+            p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=vn("TikTok_Price"), key=f"{kp}_ptik{selected_suffix}")
+            transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=1 if d.get("Transport_Type") == "ส่งทางเรือ 🚢" else 0, key=f"{kp}_trans{selected_suffix}")
             
             st.markdown("---")
             f_col1, f_col2, f_col3 = st.columns([1.5, 0.75, 0.75])
-            with f_col1: total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=vn("Total_Yuan"), key=f"{kp}_toty")
+            with f_col1: total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=vn("Total_Yuan"), key=f"{kp}_toty{selected_suffix}")
             with f_col2: 
                 st.write(""); st.write("") 
-                if mode == "add": st.button("🧹 ล้าง", on_click=clear_form_data, key=f"{kp}_clr", type="secondary")
+                if mode == "add": st.button("🧹 ล้าง", on_click=clear_form_data, key=f"{kp}_clr{selected_suffix}", type="secondary")
             with f_col3:
                 st.write(""); st.write("")
-                if st.button("✅ บันทึก" if mode == "add" else "💾 บันทึกทับ", type="primary", key=f"{kp}_sub"):
+                if st.button("✅ บันทึก" if mode == "add" else "💾 บันทึกทับ", type="primary", key=f"{kp}_sub{selected_suffix}"):
                     if not master_pid or not po_num or (qty_ord or 0) <= 0 or (total_yuan_input or 0) <= 0:
                         st.error("⚠️ ข้อมูลไม่ครบถ้วน (รหัสสินค้า, เลข PO, จำนวน, ยอดหยวน)")
                     else:
