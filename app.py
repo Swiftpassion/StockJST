@@ -16,76 +16,23 @@ st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="�
 
 st.markdown("""
 <style>
-    /* ลดพื้นที่ว่างด้านบน Header */
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
-    }
-
-    /* Card Container */
-    .metric-card {
-        background-color: #1a1a1a;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-    }
-    .metric-title {
-        color: #b0b0b0;
-        font-size: 14px;
-        font-weight: 500;
-        margin-bottom: 5px;
-    }
-    .metric-value {
-        color: #ffffff;
-        font-size: 28px;
-        font-weight: bold;
-    }
-    
-    /* Border Colors */
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
+    .metric-card { background-color: #1a1a1a; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    .metric-title { color: #b0b0b0; font-size: 14px; font-weight: 500; margin-bottom: 5px; }
+    .metric-value { color: #ffffff; font-size: 28px; font-weight: bold; }
     .border-cyan { border-left: 4px solid #00e5ff; }
     .border-gold { border-left: 4px solid #ffd700; }
     .border-red  { border-left: 4px solid #ff4d4d; }
-    
-    /* Text Colors for Values */
     .text-cyan { color: #00e5ff !important; }
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
-    
-    /* Table Headers */
-    [data-testid="stDataFrame"] th { 
-        text-align: center !important;
-        background-color: #0047AB !important;
-        color: white !important;
-        white-space: pre-wrap !important; 
-        vertical-align: middle !important;
-        min-height: 60px;
-        font-size: 14px;
-        border-bottom: 2px solid #ffffff !important;
-    }
-    
+    [data-testid="stDataFrame"] th { text-align: center !important; background-color: #0047AB !important; color: white !important; vertical-align: middle !important; min-height: 60px; font-size: 14px; border-bottom: 2px solid #ffffff !important; }
     [data-testid="stDataFrame"] th:first-child { border-top-left-radius: 8px; }
     [data-testid="stDataFrame"] th:last-child { border-top-right-radius: 8px; }
-
-    /* Table Cells */
-    [data-testid="stDataFrame"] td {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 150px;
-    }
-    
-    /* Button Full Width */
+    [data-testid="stDataFrame"] td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
     .stButton button { width: 100%; }
-    
-    /* ซ่อนปุ่ม +/- ของ Number Input */
-    button[data-testid="stNumberInputStepDown"],
-    button[data-testid="stNumberInputStepUp"] {
-        display: none !important;
-    }
-    div[data-testid="stNumberInput"] input {
-        text-align: left;
-    }
+    button[data-testid="stNumberInputStepDown"], button[data-testid="stNumberInputStepUp"] { display: none !important; }
+    div[data-testid="stNumberInput"] input { text-align: left; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -135,23 +82,14 @@ def get_po_data():
         try:
             ws = sh.worksheet(TAB_NAME_PO)
             data = ws.get_all_records()
-            
-            # กำหนด Columns มาตรฐาน
             expected_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
                              "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
                              "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
                              "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Wait_Date"]
-            
-            if not data:
-                 return pd.DataFrame(columns=expected_cols)
-            
+            if not data: return pd.DataFrame(columns=expected_cols)
             df = pd.DataFrame(data)
-            
-            # เติม Columns ที่ขาดหายไป (กรณี Sheet เก่าไม่มี Wait_Date)
             for col in expected_cols:
-                if col not in df.columns:
-                    df[col] = ""
-                    
+                if col not in df.columns: df[col] = ""
             df['Sheet_Row_Index'] = range(2, len(df) + 2) 
             return df
         except gspread.WorksheetNotFound:
@@ -181,7 +119,6 @@ def save_po_to_sheet(data_row, row_index=None):
             ws.update(range_name, [formatted_row])
         else:
             ws.append_row(formatted_row)
-            
         st.cache_data.clear() 
         return True
     except Exception as e:
@@ -198,7 +135,6 @@ def get_sale_from_folder():
             orderBy='modifiedTime desc', pageSize=1, fields="files(id, name)").execute()
         items = results.get('files', [])
         if not items: return pd.DataFrame()
-        
         file_id = items[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
@@ -209,8 +145,7 @@ def get_sale_from_folder():
         df = pd.read_excel(fh)
         col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
-        if 'Qty_Sold' in df.columns:
-            df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
+        if 'Qty_Sold' in df.columns: df['Qty_Sold'] = pd.to_numeric(df['Qty_Sold'], errors='coerce').fillna(0)
         return df
     except Exception as e:
         st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
@@ -221,12 +156,14 @@ def get_sale_from_folder():
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
-# โหลดข้อมูล
+# Initialize Session State for Dialogs
+if "active_dialog" not in st.session_state:
+    st.session_state.active_dialog = None  # None, "add", "search"
+
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
     df_sale = get_sale_from_folder()
-
     if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
     if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
 
@@ -234,28 +171,19 @@ with st.spinner('กำลังโหลดข้อมูล...'):
 # 5. DIALOG FUNCTIONS
 # ==========================================
 
-# --- Dialog 1: ประวัติการสั่งซื้อ ---
 @st.dialog("📜 ประวัติการสั่งซื้อ (PO History)", width="large")
 def show_history_dialog():
     st.caption("ค้นหาและเลือกสินค้าเพื่อดูประวัติการสั่งซื้อทั้งหมด")
-    
     if df_master.empty or df_po.empty:
         st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
         return
-
     product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-    selected_product = st.selectbox(
-        "🔍 ค้นหาสินค้า (ชื่อ/รหัส)", 
-        options=product_options,
-        index=None,
-        placeholder="พิมพ์เพื่อค้นหา..."
-    )
-
+    selected_product = st.selectbox("🔍 ค้นหาสินค้า (ชื่อ/รหัส)", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...")
+    
     if selected_product:
         selected_pid = selected_product.split(" : ")[0]
         history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
-        if 'Sheet_Row_Index' in history_df.columns:
-            history_df = history_df.drop(columns=['Sheet_Row_Index'])
+        if 'Sheet_Row_Index' in history_df.columns: history_df = history_df.drop(columns=['Sheet_Row_Index'])
         
         if not history_df.empty:
             if 'Order_Date' in history_df.columns:
@@ -265,7 +193,6 @@ def show_history_dialog():
 
             st.divider()
             st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
-            
             st.dataframe(
                 history_df,
                 column_config={
@@ -294,67 +221,70 @@ def show_history_dialog():
         else:
             st.warning("สินค้านี้ยังไม่มีประวัติการสั่งซื้อ (PO)")
 
-# --- Dialog 2: จัดการ PO ---
 @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
 def po_form_dialog(mode="add"):
+    # ฟังก์ชันสำหรับปิด Dialog
+    def close_me():
+        st.session_state.active_dialog = None
+        st.rerun()
+
+    # Header & Close Button
+    col_h1, col_h2 = st.columns([0.85, 0.15])
+    with col_h1:
+        if mode == "add": st.subheader("➕ เพิ่มรายการใหม่")
+        else: st.subheader("✏️ แก้ไขรายการ")
+    with col_h2:
+        if st.button("❌ ปิด", key="btn_close_dialog"):
+            close_me()
+
     d = {}
     sheet_row_index = None
-    
-    # --- ส่วนค้นหา (เฉพาะโหมด Search) ---
+
+    # --- ส่วนค้นหา (โหมด Search) ---
     if mode == "search":
-        st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
+        st.markdown("### 🔍 ค้นหา PO")
         if not df_po.empty: 
-            # ใช้วิธี Map Key แทน Split เพื่อความแม่นยำ 100%
             po_map = {f"{row['PO_Number']} (สินค้า: {row['Product_ID']})": row for _, row in df_po.iterrows()}
-            
-            selected_key = st.selectbox(
-                "เลือกรายการ PO", 
-                options=list(po_map.keys()), 
-                index=None, 
-                placeholder="พิมพ์เพื่อค้นหา PO..."
-            )
-            
+            selected_key = st.selectbox("เลือกรายการ PO", options=list(po_map.keys()), index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
             if selected_key:
                 d = po_map[selected_key].to_dict()
-                # ตรวจสอบว่ามี Sheet_Row_Index หรือไม่ (กัน Error)
-                if 'Sheet_Row_Index' in d:
-                    sheet_row_index = int(d['Sheet_Row_Index'])
-                    st.success(f"โหลดข้อมูล: {selected_key}")
-                else:
-                    st.error("ไม่พบข้อมูล Index ของแถว กรุณากดอัพเดตข้อมูลหลัก")
-                    return
-            else:
-                st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
-                return
+                if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
+                else: 
+                    # Fallback หา Index กรณีข้อมูลเก่า
+                    match_row = df_po[(df_po['PO_Number']==d['PO_Number']) & (df_po['Product_ID']==d['Product_ID'])]
+                    if not match_row.empty: sheet_row_index = match_row.index[0] + 2
         else:
-            st.warning("ยังไม่มีข้อมูล PO ในระบบ")
+            st.warning("ยังไม่มีข้อมูล PO")
             return
-    
+
     # --- ปุ่มล้างข้อมูล (เฉพาะโหมด Add) ---
     if mode == "add":
-        col_head_1, col_head_2 = st.columns([3, 1])
-        with col_head_1:
-            st.markdown(f"#### เพิ่มรายการใหม่")
-        with col_head_2:
-            if st.button("🧹 ล้างข้อมูล (Reset)", key="btn_clear_form"):
-                st.rerun()
+        def clear_form_data():
+            # ลบ Key ของ Input เพื่อให้ Widget รีเซ็ตเป็นค่าว่าง
+            keys_to_clear = [
+                "add_po_num", "add_order_date", "add_recv_date", "add_weight",
+                "add_qty_ord", "add_qty_rem", "add_yuan_rate", "add_fees",
+                "add_p_novat", "add_p_1688_no", "add_p_1688_ship", 
+                "add_p_shopee", "add_p_tiktok", "add_transport", "add_total_yuan"
+            ]
+            for k in keys_to_clear:
+                if k in st.session_state: del st.session_state[k]
+        
+        col_clear_1, col_clear_2 = st.columns([3, 1])
+        with col_clear_2:
+            st.button("🧹 ล้างข้อมูล", on_click=clear_form_data, key="btn_clear_data")
 
-    elif mode == "search":
-        st.markdown(f"#### ✏️ แก้ไขรายการ: {d.get('PO_Number', '-')}")
-        st.divider()
-
+    # --- เตรียมข้อมูลสำหรับการแสดงผล ---
+    key_prefix = "add" if mode == "add" else "search"
+    
     st.markdown("##### 1. ค้นหารหัสสินค้า")
     product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-    
     default_idx = None
-    # Auto-select product in Search Mode
     if mode == "search" and "Product_ID" in d:
-         # ใช้ str comparison เพื่อความชัวร์
-         target_pid = str(d["Product_ID"])
-         matches = [i for i, opt in enumerate(product_options) if opt.startswith(target_pid + " :")]
+         matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]) + " :")]
          if matches: default_idx = matches[0]
 
-    selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
+    selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed", key=f"{key_prefix}_product_select")
     
     master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
     master_pid = ""
@@ -365,7 +295,6 @@ def po_form_dialog(mode="add"):
         row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
         master_name = row_info['Product_Name']
         if row_info['Image']: master_img_url = row_info['Image']
-    st.write("") 
 
     with st.container(border=True):
         col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
@@ -380,55 +309,48 @@ def po_form_dialog(mode="add"):
                 def get_date_val(val):
                     if not val or val == "" or val == "nan": return None
                     try: return datetime.strptime(str(val), "%Y-%m-%d").date()
-                    except:
-                        try: return datetime.strptime(str(val), "%d/%m/%Y").date()
-                        except: return None
+                    except: return None
                 
+                # ฟังก์ชันช่วยดึงค่า (ถ้าเป็น mode add ค่าจะเป็นค่าว่างจาก default)
+                def v(k): return d.get(k) if mode == "search" else None
+                def vn(k): 
+                    val = d.get(k)
+                    try: return float(val) if val and float(val)!=0 else None
+                    except: return None
+
                 r1c1, r1c2, r1c3 = st.columns(3)
-                po_num = r1c1.text_input("เลข PO *", value=d.get("PO_Number", ""), placeholder="ระบุเลข PO")
+                po_num = r1c1.text_input("เลข PO *", value=v("PO_Number"), placeholder="ระบุเลข PO", key=f"{key_prefix}_po_num")
                 
-                def_order_date = get_date_val(d.get("Order_Date")) or date.today()
-                def_recv_date = get_date_val(d.get("Received_Date"))
+                def_order_date = get_date_val(d.get("Order_Date")) if mode=="search" else date.today()
+                order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date, key=f"{key_prefix}_order_date")
+                recv_date = r1c3.date_input("ของมา (ประมาณ)", value=get_date_val(d.get("Received_Date")), key=f"{key_prefix}_recv_date")
                 
-                order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date)
-                recv_date = r1c3.date_input("ของมา (ประมาณ)", value=def_recv_date)
-                
-                weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight", ""), height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
+                weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=v("Transport_Weight"), height=100, placeholder="รายละเอียด...", key=f"{key_prefix}_weight")
                 
                 st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
                 r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-                
-                def val_num(key, default=None):
-                    v = d.get(key)
-                    try: return float(v) if v and str(v) != "nan" and float(v) != 0 else default
-                    except: return default
-
-                qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=val_num("Qty_Ordered"), placeholder="0") 
-                qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=val_num("Qty_Remaining"), placeholder="0")
-                yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Yuan_Rate"), placeholder="0.00")
-                fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=val_num("Fees"), placeholder="0.00")
+                qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{key_prefix}_qty_ord") 
+                qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{key_prefix}_qty_rem")
+                yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{key_prefix}_yuan_rate")
+                fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{key_prefix}_fees")
                 
                 r4c1, r4c2, r4c3 = st.columns(3)
-                p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_Unit_NoVAT"), placeholder="0.00")
-                p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_NoShip"), placeholder="0.00")
-                p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=val_num("Price_1688_WithShip"), placeholder="0.00")
+                p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_Unit_NoVAT"), key=f"{key_prefix}_p_novat")
+                p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_NoShip"), key=f"{key_prefix}_p_1688_no")
+                p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_WithShip"), key=f"{key_prefix}_p_1688_ship")
 
                 st.markdown("###### 🏷️ ราคาขาย & สรุป")
                 r5c1, r5c2, r5c3 = st.columns(3)
-                p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=val_num("Shopee_Price"), placeholder="0.00")
-                p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=val_num("TikTok_Price"), placeholder="0.00")
+                p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=vn("Shopee_Price"), key=f"{key_prefix}_p_shopee")
+                p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=vn("TikTok_Price"), key=f"{key_prefix}_p_tiktok")
                 
-                def_transport_idx = 0
-                if "Transport_Type" in d and d.get("Transport_Type") == "ส่งทางเรือ 🚢": def_transport_idx = 1
-                transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx)
+                def_transport_idx = 1 if d.get("Transport_Type") == "ส่งทางเรือ 🚢" else 0
+                transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx, key=f"{key_prefix}_transport")
                 
-                saved_total = val_num("Total_Yuan", default=0.0)
-                input_val_total = float(saved_total) if saved_total > 0 else None
-
                 st.markdown("---")
                 f_col1, f_col2 = st.columns([2, 1])
                 with f_col1:
-                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=input_val_total, placeholder="0.00")
+                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=vn("Total_Yuan"), key=f"{key_prefix}_total_yuan")
 
                 with f_col2:
                     st.write(""); st.write("")
@@ -445,22 +367,19 @@ def po_form_dialog(mode="add"):
                     
                     if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                     else:
-                        # คำนวณ Wait_Date (จำนวนวันที่รอสินค้า)
                         wait_days = ""
-                        if order_date and recv_date:
-                            wait_days = (recv_date - order_date).days
+                        if order_date and recv_date: wait_days = (recv_date - order_date).days
                         
                         new_row = [
                             master_pid, po_num, order_date, recv_date, weight_txt, 
                             qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
                             p_1688_noship or 0, p_1688_ship or 0, total_yuan_input or 0, 
-                            p_shopee or 0, p_tiktok or 0, fees or 0, transport,
-                            wait_days
+                            p_shopee or 0, p_tiktok or 0, fees or 0, transport, wait_days
                         ]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
-                            st.success("✅ บันทึกเรียบร้อย! ข้อมูลถูกส่งไปที่ Google Sheet แล้ว")
+                            st.success("✅ บันทึกเรียบร้อย!")
                             if mode == "add":
-                                st.caption("กดปุ่ม 'ล้างข้อมูล' ด้านบนเพื่อกรอกรายการต่อไป")
+                                st.info("กดปุ่ม '🧹 ล้างข้อมูล' เพื่อกรอกรายการถัดไป หรือกด '❌ ปิด' เมื่อเสร็จสิ้น")
 
 # ==========================================
 # 6. TABS & UI LOGIC
@@ -486,175 +405,93 @@ with tab1:
         
         df_stock_report['Qty_Sold'] = df_stock_report['Product_ID'].map(sales_map).fillna(0)
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Qty_Sold']
-        
-        def get_status(val):
-            if val <= 0: return "🔴 หมดเกลี้ยง"
-            elif val < 10: return "⚠️ ใกล้หมด"
-            else: return "🟢 มีของ"
-        df_stock_report['Status'] = df_stock_report['Current_Stock'].apply(get_status)
+        df_stock_report['Status'] = df_stock_report['Current_Stock'].apply(lambda x: "🔴 หมดเกลี้ยง" if x<=0 else ("⚠️ ใกล้หมด" if x<10 else "🟢 มีของ"))
 
         # Metrics
-        total_items = len(df_stock_report)
-        total_sold_all = df_stock_report['Qty_Sold'].sum()
-        critical_stock = len(df_stock_report[df_stock_report['Current_Stock'] < 10])
-
         c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f"""<div class="metric-card border-cyan"><div class="metric-title">สินค้าทั้งหมด (Master)</div><div class="metric-value text-cyan">{total_items:,}</div></div>""", unsafe_allow_html=True)
-        with c2: st.markdown(f"""<div class="metric-card border-gold"><div class="metric-title">ยอดขายรวม (ชิ้น)</div><div class="metric-value text-gold">{int(total_sold_all):,}</div></div>""", unsafe_allow_html=True)
-        with c3: st.markdown(f"""<div class="metric-card border-red"><div class="metric-title">ต้องเติมของ (รายการ)</div><div class="metric-value text-red">{critical_stock:,}</div></div>""", unsafe_allow_html=True)
+        with c1: st.markdown(f"""<div class="metric-card border-cyan"><div class="metric-title">สินค้าทั้งหมด</div><div class="metric-value text-cyan">{len(df_stock_report):,}</div></div>""", unsafe_allow_html=True)
+        with c2: st.markdown(f"""<div class="metric-card border-gold"><div class="metric-title">ยอดขายรวม</div><div class="metric-value text-gold">{int(df_stock_report['Qty_Sold'].sum()):,}</div></div>""", unsafe_allow_html=True)
+        with c3: st.markdown(f"""<div class="metric-card border-red"><div class="metric-title">ต้องเติมของ</div><div class="metric-value text-red">{len(df_stock_report[df_stock_report['Current_Stock'] < 10]):,}</div></div>""", unsafe_allow_html=True)
         
         st.divider()
         
-        # Filters & Actions
+        # Filters
         if 'filter_status' not in st.session_state: st.session_state.filter_status = []
         if 'search_query' not in st.session_state: st.session_state.search_query = ""
-
-        def clear_filters():
-            st.session_state.filter_status = []
-            st.session_state.search_query = ""
-        def manual_update():
-            st.cache_data.clear()
-            st.rerun()
-
+        
         col_f1, col_f2, col_b1, col_b2, col_b3 = st.columns([2, 2, 0.4, 0.5, 0.5])
-        with col_f1:
-            selected_status = st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], key="filter_status")
-        with col_f2:
-            search_text = st.text_input("ค้นหา (ชื่อ/รหัส)", key="search_query", placeholder="เช่น ชั้นวางของ, SP001...")
-        
-        with col_b1:
+        with col_f1: st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], key="filter_status")
+        with col_f2: st.text_input("ค้นหา (ชื่อ/รหัส)", key="search_query")
+        with col_b1: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("❌ ล้าง", on_click=clear_filters)
-        with col_b2:
+            st.button("❌ ล้าง", on_click=lambda: [st.session_state.update({'filter_status':[], 'search_query':''})])
+        with col_b2: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            if st.button("📜 ดูประวัติ", type="secondary"): 
-                show_history_dialog()
-        with col_b3:
+            if st.button("📜 ดูประวัติ", type="secondary"): show_history_dialog()
+        with col_b3: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("🔄 อัพเดต", on_click=manual_update, type="primary")
+            st.button("🔄", on_click=lambda: [st.cache_data.clear(), st.rerun()], type="primary")
 
-        # Table Logic
+        # Table
         show_df = df_stock_report.copy()
-        
-        if selected_status and "📦 สินค้าทั้งหมด" not in selected_status:
-            show_df = show_df[show_df['Status'].isin(selected_status)]
+        if st.session_state.filter_status and "📦 สินค้าทั้งหมด" not in st.session_state.filter_status:
+            show_df = show_df[show_df['Status'].isin(st.session_state.filter_status)]
+        if st.session_state.search_query:
+            show_df = show_df[show_df['Product_Name'].str.contains(st.session_state.search_query, case=False, na=False) | show_df['Product_ID'].str.contains(st.session_state.search_query, case=False, na=False)]
 
-        if search_text:
-            mask = (
-                show_df['Product_Name'].str.contains(search_text, case=False, na=False) |
-                show_df['Product_ID'].str.contains(search_text, case=False, na=False)
-            )
-            show_df = show_df[mask]
-
-        # Cleaning
-        str_cols = ["Image", "Product_ID", "Product_Name", "PO_Number", "Order_Date", 
-                    "Received_Date", "Transport_Weight", "Transport_Type", "Status"]
-        for col in str_cols:
+        for col in ["Image", "Product_ID", "Product_Name", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Transport_Type", "Status"]:
             if col in show_df.columns: show_df[col] = show_df[col].fillna("").astype(str)
-
-        num_cols = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
-                    "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
-                    "Shopee_Price", "TikTok_Price", "Fees", "Qty_Sold", "Current_Stock"]
-        for col in num_cols:
+        for col in ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees", "Qty_Sold", "Current_Stock"]:
             if col in show_df.columns: show_df[col] = pd.to_numeric(show_df[col], errors='coerce').fillna(0)
 
-        # Display
-        COL_WIDTH = 100 
-        def color_negative_red(val):
-            try: color = '#ff4d4d' if float(val) < 0 else 'white'
-            except: color = 'white'
-            return f'color: {color}'
-
-        display_columns = [
-            "Product_ID", "Image", "Product_Name", "PO_Number", "Order_Date", "Received_Date", 
-            "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", 
-            "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan",
-            "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Qty_Sold", "Current_Stock", "Status"
-        ]
-        final_cols = [c for c in display_columns if c in show_df.columns]
-        
         st.dataframe(
-            show_df[final_cols].style.map(color_negative_red, subset=['Current_Stock', 'Qty_Remaining']),
+            show_df[[c for c in ["Product_ID", "Image", "Product_Name", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Qty_Sold", "Current_Stock", "Status"] if c in show_df.columns]].style.map(lambda v: f'color: {"#ff4d4d" if float(v)<0 else "white"}' if isinstance(v, (int, float)) else None, subset=['Current_Stock', 'Qty_Remaining']),
             column_config={
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
                 "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=150), 
-                "PO_Number": st.column_config.TextColumn("เลข PO", width=COL_WIDTH),
-                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=COL_WIDTH),
-                "Received_Date": st.column_config.TextColumn("ของมา", width=COL_WIDTH),
-                "Transport_Weight": st.column_config.TextColumn("น้ำหนัก\nขนส่ง", width=COL_WIDTH),
-                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d", width=COL_WIDTH),
-                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d", width=COL_WIDTH),
-                "Yuan_Rate": st.column_config.NumberColumn("เรท\nหยวน", format="%.2f", width=COL_WIDTH),
-                "Price_Unit_NoVAT": st.column_config.NumberColumn(label="ราคาต่อชิ้น\nไม่รวม VAT", format="%.2f", width=COL_WIDTH),
-                "Price_1688_NoShip": st.column_config.NumberColumn(label="ราคา1688/1 ชิ้น\nไม่รวมค่าส่ง", format="%.2f", width=COL_WIDTH),
-                "Price_1688_WithShip": st.column_config.NumberColumn(label="ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f", width=COL_WIDTH),
-                "Total_Yuan": st.column_config.NumberColumn(label="ราคาหยวน\nทั้งหมด", format="%.2f ¥", width=COL_WIDTH),
-                "Shopee_Price": st.column_config.NumberColumn(label="ราคาใน\nช้อปปี้", format="%.2f", width=COL_WIDTH),
-                "TikTok_Price": st.column_config.NumberColumn(label="ราคาใน\nTIKTOK", format="%.2f", width=COL_WIDTH),
-                "Fees": st.column_config.NumberColumn(label="ค่า\nธรรมเนียม", format="%.2f", width=COL_WIDTH),
-                "Transport_Type": st.column_config.TextColumn("การขนส่ง", width=COL_WIDTH),
-                "Qty_Sold": st.column_config.NumberColumn("ยอดขาย", format="%d", width=COL_WIDTH),
-                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=COL_WIDTH),
-                "Status": st.column_config.TextColumn("Status", width=COL_WIDTH),
+                "PO_Number": st.column_config.TextColumn("เลข PO", width=100),
+                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=100),
+                "Received_Date": st.column_config.TextColumn("ของมา", width=100),
+                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d", width=100),
+                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d", width=100),
+                "Total_Yuan": st.column_config.NumberColumn("ราคาหยวน", format="%.2f ¥", width=100),
+                "Qty_Sold": st.column_config.NumberColumn("ยอดขาย", format="%d", width=100),
+                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=100),
             },
-            height=2300, 
-            use_container_width=True,
-            hide_index=True
+            height=2300, use_container_width=True, hide_index=True
         )
-    else:
-        st.warning("ไม่พบข้อมูล Master Product")
+    else: st.warning("ไม่พบข้อมูล Master Product")
 
 # ==========================================
 # TAB 2: Purchase Orders
 # ==========================================
 with tab2:
-    # --- UI Logic ---
     col_head, col_action = st.columns([4, 2])
     with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า")
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
             if st.button("➕ เพิ่ม PO ใหม่", type="primary"): 
-                po_form_dialog(mode="add")
+                st.session_state.active_dialog = "add"
+                st.rerun()
         with b2:
-            if st.button("🔍 ค้นหา & แก้ไข PO", type="secondary"): 
-                po_form_dialog(mode="search")
+            if st.button("🔍 ค้นหา & แก้ไข", type="secondary"): 
+                st.session_state.active_dialog = "search"
+                st.rerun()
+
+    # Logic to trigger dialogs based on session state
+    if st.session_state.active_dialog == "add":
+        po_form_dialog(mode="add")
+    elif st.session_state.active_dialog == "search":
+        po_form_dialog(mode="search")
 
     if not df_po.empty:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
         if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
-        
-        str_cols_po = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Transport_Type"]
-        for col in str_cols_po:
-             if col in df_po_display.columns: df_po_display[col] = df_po_display[col].fillna("").astype(str)
-
-        num_cols_po = ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan"]
-        for col in num_cols_po:
-             if col in df_po_display.columns: df_po_display[col] = pd.to_numeric(df_po_display[col], errors='coerce').fillna(0)
-
-        po_display_cols = [
-            "Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
-            "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"
-        ]
-        cols_to_show = [c for c in po_display_cols if c in df_po_display.columns]
-
         st.data_editor(
-            df_po_display[cols_to_show],
-            column_config={
-                "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
-                "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
-                "PO_Number": st.column_config.TextColumn("เลข PO", width=100),
-                "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=100), 
-                "Received_Date": st.column_config.TextColumn("ของมา", width=100), 
-                "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width=200),
-                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
-                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                "Yuan_Rate": st.column_config.NumberColumn("เรทหยวน", format="%.2f"),
-                "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
-                "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
-            },
+            df_po_display[["Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"]],
+            column_config={"Image": st.column_config.ImageColumn("รูปสินค้า", width=80)},
             height=700, use_container_width=True, hide_index=True, disabled=True 
         )
-    else:
-        st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
+    else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
