@@ -537,7 +537,9 @@ with tab1:
                         df_pivot = df_pivot[df_pivot.index.isin(products_sold_on_focus)]
 
                     if df_pivot.empty:
-                        st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {'ในช่วงเวลาที่เลือก' if not use_focus_date else f'ในวันที่ {focus_date.strftime('%d/%m/%Y')}'}")
+                        # --- แก้ไขจุดที่เกิด Error: แยก string ออกมาเพื่อไม่ให้ quote ตีกัน ---
+                        msg_suffix = f"ในวันที่ {focus_date.strftime('%d/%m/%Y')}" if use_focus_date else "ในช่วงเวลาที่เลือก"
+                        st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {msg_suffix}")
                     else:
                         sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data['Day_Col'].values else 0)
                         df_pivot = df_pivot[sorted_cols]
