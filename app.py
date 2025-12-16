@@ -591,7 +591,7 @@ with tab1:
                                 "Status": st.column_config.TextColumn("สถานะ", width=80),
                                 **dynamic_col_config # unpack dynamic columns config
                             },
-                            height=600, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
+                            height=1500, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
                         )
                         
                         if event.selection and event.selection["rows"]:
@@ -741,7 +741,7 @@ with tab3:
                 "Status": st.column_config.TextColumn("สถานะ", disabled=True, width=100),
                 "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0, step=1, format="%d", width=130),
             },
-            height=600, use_container_width=True, hide_index=True, key="edited_stock_data"
+            height=1500, use_container_width=True, hide_index=True, key="edited_stock_data"
         )
         st.markdown(f"**แสดงผล:** {len(edited_df)} รายการ (จากทั้งหมด {len(df_stock_report)}) | **สินค้าต้องเติม (⚠️+🔴):** {len(df_stock_report[df_stock_report['Status']!='🟢 มีของ'])}")
         
