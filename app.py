@@ -156,9 +156,9 @@ def get_sale_from_folder():
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
-# Initialize Session State for Dialogs
+# Initialize Session State
 if "active_dialog" not in st.session_state:
-    st.session_state.active_dialog = None  # None, "add", "search"
+    st.session_state.active_dialog = None
 
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
@@ -223,19 +223,9 @@ def show_history_dialog():
 
 @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
 def po_form_dialog(mode="add"):
-    # ฟังก์ชันสำหรับปิด Dialog
-    def close_me():
-        st.session_state.active_dialog = None
-        st.rerun()
-
-    # Header & Close Button
-    col_h1, col_h2 = st.columns([0.85, 0.15])
-    with col_h1:
-        if mode == "add": st.subheader("➕ เพิ่มรายการใหม่")
-        else: st.subheader("✏️ แก้ไขรายการ")
-    with col_h2:
-        if st.button("❌ ปิด", key="btn_close_dialog"):
-            close_me()
+    # Header
+    if mode == "add": st.subheader("➕ เพิ่มรายการใหม่")
+    else: st.subheader("✏️ แก้ไขรายการ")
 
     d = {}
     sheet_row_index = None
@@ -250,29 +240,34 @@ def po_form_dialog(mode="add"):
                 d = po_map[selected_key].to_dict()
                 if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
                 else: 
-                    # Fallback หา Index กรณีข้อมูลเก่า
                     match_row = df_po[(df_po['PO_Number']==d['PO_Number']) & (df_po['Product_ID']==d['Product_ID'])]
                     if not match_row.empty: sheet_row_index = match_row.index[0] + 2
         else:
             st.warning("ยังไม่มีข้อมูล PO")
             return
 
-    # --- ปุ่มล้างข้อมูล (เฉพาะโหมด Add) ---
-    if mode == "add":
-        def clear_form_data():
-            # ลบ Key ของ Input เพื่อให้ Widget รีเซ็ตเป็นค่าว่าง
-            keys_to_clear = [
-                "add_po_num", "add_order_date", "add_recv_date", "add_weight",
-                "add_qty_ord", "add_qty_rem", "add_yuan_rate", "add_fees",
-                "add_p_novat", "add_p_1688_no", "add_p_1688_ship", 
-                "add_p_shopee", "add_p_tiktok", "add_transport", "add_total_yuan"
-            ]
-            for k in keys_to_clear:
-                if k in st.session_state: del st.session_state[k]
-        
-        col_clear_1, col_clear_2 = st.columns([3, 1])
-        with col_clear_2:
-            st.button("🧹 ล้างข้อมูล", on_click=clear_form_data, key="btn_clear_data")
+    # --- ฟังก์ชันล้างข้อมูล (Reset Callback) ---
+    def clear_form_data():
+        # กำหนดค่าเริ่มต้นให้กับทุก Key ที่ใช้ใน Input เพื่อบังคับล้างค่า
+        keys_to_reset = {
+            "add_po_num": "",
+            "add_order_date": date.today(),
+            "add_recv_date": None,
+            "add_weight": "",
+            "add_qty_ord": 0.0,
+            "add_qty_rem": 0.0,
+            "add_yuan_rate": 0.0,
+            "add_fees": 0.0,
+            "add_p_novat": 0.0,
+            "add_p_1688_no": 0.0,
+            "add_p_1688_ship": 0.0,
+            "add_p_shopee": 0.0,
+            "add_p_tiktok": 0.0,
+            "add_transport": 0, # Index 0
+            "add_total_yuan": 0.0
+        }
+        for k, v in keys_to_reset.items():
+            st.session_state[k] = v
 
     # --- เตรียมข้อมูลสำหรับการแสดงผล ---
     key_prefix = "add" if mode == "add" else "search"
@@ -304,60 +299,66 @@ def po_form_dialog(mode="add"):
             if master_name: st.caption(f"{master_name}")
         
         with col_right_form:
-            with st.form("po_form", border=False):
-                st.markdown("###### 📄 ข้อมูลทั่วไป")
-                def get_date_val(val):
-                    if not val or val == "" or val == "nan": return None
-                    try: return datetime.strptime(str(val), "%Y-%m-%d").date()
-                    except: return None
-                
-                # ฟังก์ชันช่วยดึงค่า (ถ้าเป็น mode add ค่าจะเป็นค่าว่างจาก default)
-                def v(k): return d.get(k) if mode == "search" else None
-                def vn(k): 
-                    val = d.get(k)
-                    try: return float(val) if val and float(val)!=0 else None
-                    except: return None
+            # หมายเหตุ: นำ st.form ออก เพื่อให้ปุ่ม Reset ทำงานได้ทันที
+            st.markdown("###### 📄 ข้อมูลทั่วไป")
+            def get_date_val(val):
+                if not val or val == "" or val == "nan": return None
+                try: return datetime.strptime(str(val), "%Y-%m-%d").date()
+                except: return None
+            
+            def v(k): return d.get(k) if mode == "search" else None
+            def vn(k): 
+                val = d.get(k)
+                try: return float(val) if val and float(val)!=0 else None
+                except: return None
 
-                r1c1, r1c2, r1c3 = st.columns(3)
-                po_num = r1c1.text_input("เลข PO *", value=v("PO_Number"), placeholder="ระบุเลข PO", key=f"{key_prefix}_po_num")
-                
-                def_order_date = get_date_val(d.get("Order_Date")) if mode=="search" else date.today()
-                order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date, key=f"{key_prefix}_order_date")
-                recv_date = r1c3.date_input("ของมา (ประมาณ)", value=get_date_val(d.get("Received_Date")), key=f"{key_prefix}_recv_date")
-                
-                weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=v("Transport_Weight"), height=100, placeholder="รายละเอียด...", key=f"{key_prefix}_weight")
-                
-                st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
-                r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-                qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{key_prefix}_qty_ord") 
-                qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{key_prefix}_qty_rem")
-                yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{key_prefix}_yuan_rate")
-                fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{key_prefix}_fees")
-                
-                r4c1, r4c2, r4c3 = st.columns(3)
-                p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_Unit_NoVAT"), key=f"{key_prefix}_p_novat")
-                p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_NoShip"), key=f"{key_prefix}_p_1688_no")
-                p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_WithShip"), key=f"{key_prefix}_p_1688_ship")
+            r1c1, r1c2, r1c3 = st.columns(3)
+            po_num = r1c1.text_input("เลข PO *", value=v("PO_Number"), placeholder="ระบุเลข PO", key=f"{key_prefix}_po_num")
+            
+            def_order_date = get_date_val(d.get("Order_Date")) if mode=="search" else date.today()
+            order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date, key=f"{key_prefix}_order_date")
+            recv_date = r1c3.date_input("ของมา (ประมาณ)", value=get_date_val(d.get("Received_Date")), key=f"{key_prefix}_recv_date")
+            
+            weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=v("Transport_Weight"), height=100, placeholder="รายละเอียด...", key=f"{key_prefix}_weight")
+            
+            st.markdown("###### 💰 ปริมาณ & ราคาต้นทุน")
+            r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+            qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{key_prefix}_qty_ord") 
+            qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{key_prefix}_qty_rem")
+            yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{key_prefix}_yuan_rate")
+            fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{key_prefix}_fees")
+            
+            r4c1, r4c2, r4c3 = st.columns(3)
+            p_no_vat = r4c1.number_input("ราคาต่อชิ้นไม่รวม VAT", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_Unit_NoVAT"), key=f"{key_prefix}_p_novat")
+            p_1688_noship = r4c2.number_input("ราคา 1688 ไม่รวมส่ง", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_NoShip"), key=f"{key_prefix}_p_1688_no")
+            p_1688_ship = r4c3.number_input("ราคา 1688 รวมส่ง *", min_value=0.0, step=0.0, format="%.2f", value=vn("Price_1688_WithShip"), key=f"{key_prefix}_p_1688_ship")
 
-                st.markdown("###### 🏷️ ราคาขาย & สรุป")
-                r5c1, r5c2, r5c3 = st.columns(3)
-                p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=vn("Shopee_Price"), key=f"{key_prefix}_p_shopee")
-                p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=vn("TikTok_Price"), key=f"{key_prefix}_p_tiktok")
-                
-                def_transport_idx = 1 if d.get("Transport_Type") == "ส่งทางเรือ 🚢" else 0
-                transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx, key=f"{key_prefix}_transport")
-                
-                st.markdown("---")
-                f_col1, f_col2 = st.columns([2, 1])
-                with f_col1:
-                    total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=vn("Total_Yuan"), key=f"{key_prefix}_total_yuan")
+            st.markdown("###### 🏷️ ราคาขาย & สรุป")
+            r5c1, r5c2, r5c3 = st.columns(3)
+            p_shopee = r5c1.number_input("Shopee", min_value=0.0, step=0.0, format="%.2f", value=vn("Shopee_Price"), key=f"{key_prefix}_p_shopee")
+            p_tiktok = r5c2.number_input("TikTok", min_value=0.0, step=0.0, format="%.2f", value=vn("TikTok_Price"), key=f"{key_prefix}_p_tiktok")
+            
+            def_transport_idx = 1 if d.get("Transport_Type") == "ส่งทางเรือ 🚢" else 0
+            transport = r5c3.selectbox("การขนส่ง", ["ส่งทางรถ 🚛", "ส่งทางเรือ 🚢"], index=def_transport_idx, key=f"{key_prefix}_transport")
+            
+            st.markdown("---")
+            # Layout ปุ่มด้านล่าง
+            f_col1, f_col2, f_col3 = st.columns([1.5, 0.75, 0.75])
+            with f_col1:
+                total_yuan_input = st.number_input("ราคาหยวนทั้งหมด *", min_value=0.0, step=0.0, format="%.2f", value=vn("Total_Yuan"), key=f"{key_prefix}_total_yuan")
 
-                with f_col2:
-                    st.write(""); st.write("")
-                    btn_label = "✅ ยืนยันเพิ่ม" if mode == "add" else "💾 บันทึกทับ"
-                    submitted = st.form_submit_button(btn_label, type="primary", use_container_width=True)
+            # ปุ่ม Clear (เฉพาะโหมด Add)
+            with f_col2:
+                st.write(""); st.write("") # ดันปุ่มลงมา
+                if mode == "add":
+                     st.button("🧹 ล้าง", on_click=clear_form_data, key="btn_clear_data_bottom", type="secondary")
 
-                if submitted:
+            # ปุ่ม Save
+            with f_col3:
+                st.write(""); st.write("") # ดันปุ่มลงมา
+                btn_label = "✅ บันทึก" if mode == "add" else "💾 บันทึกทับ"
+                if st.button(btn_label, type="primary", key="btn_submit_po"):
+                    # Validation Logic
                     errors = []
                     if not master_pid: errors.append("ยังไม่ได้เลือกสินค้า")
                     if not po_num: errors.append("ยังไม่ได้ระบุเลข PO")
@@ -365,7 +366,8 @@ def po_form_dialog(mode="add"):
                     if (p_1688_ship or 0) <= 0: errors.append("ราคาต้นทุนรวมส่งต้องมากกว่า 0")
                     if (total_yuan_input or 0) <= 0: errors.append("ยอดรวมหยวนต้องมากกว่า 0")
                     
-                    if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
+                    if errors: 
+                        st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                     else:
                         wait_days = ""
                         if order_date and recv_date: wait_days = (recv_date - order_date).days
@@ -378,8 +380,7 @@ def po_form_dialog(mode="add"):
                         ]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
                             st.success("✅ บันทึกเรียบร้อย!")
-                            if mode == "add":
-                                st.info("กดปุ่ม '🧹 ล้างข้อมูล' เพื่อกรอกรายการถัดไป หรือกด '❌ ปิด' เมื่อเสร็จสิ้น")
+                            # ไม่ต้อง Rerun เพื่อให้ผู้ใช้เห็นข้อความ Success
 
 # ==========================================
 # 6. TABS & UI LOGIC
