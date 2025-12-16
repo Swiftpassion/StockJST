@@ -70,6 +70,26 @@ def get_stock_from_sheet():
         ws = sh.worksheet(TAB_NAME_STOCK)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
+        
+        # --- FIX: Mapping Columns (Thai -> English) ---
+        # เพิ่มส่วนนี้เพื่อแปลงชื่อคอลัมน์จากภาษาไทยเป็นภาษาอังกฤษที่ระบบใช้
+        col_map = {
+            'รหัสสินค้า': 'Product_ID',
+            'รหัส': 'Product_ID',
+            'ID': 'Product_ID',
+            'ชื่อสินค้า': 'Product_Name',
+            'ชื่อ': 'Product_Name',
+            'Name': 'Product_Name',
+            'รูป': 'Image',
+            'รูปภาพ': 'Image',
+            'Link รูป': 'Image',
+            'Stock': 'Initial_Stock',
+            'จำนวน': 'Initial_Stock',
+            'สต็อก': 'Initial_Stock'
+        }
+        # เปลี่ยนชื่อคอลัมน์ที่มีใน col_map
+        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
+        
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
@@ -204,10 +224,19 @@ with st.spinner('กำลังโหลดข้อมูล...'):
     df_po = get_po_data()
     df_sale = get_sale_from_folder()
     
+    # Validation: Check if df_master has required columns
+    if not df_master.empty and 'Product_ID' not in df_master.columns:
+        st.error("❌ ไม่พบคอลัมน์ 'Product_ID' (หรือ 'รหัสสินค้า') ในหน้า MASTER Sheet กรุณาตรวจสอบหัวข้อคอลัมน์")
+    
     # Ensure Product_ID is string for merging
-    if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
-    if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
-    if not df_sale.empty: df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
+    if not df_master.empty and 'Product_ID' in df_master.columns: 
+        df_master['Product_ID'] = df_master['Product_ID'].astype(str)
+        
+    if not df_po.empty and 'Product_ID' in df_po.columns: 
+        df_po['Product_ID'] = df_po['Product_ID'].astype(str)
+        
+    if not df_sale.empty and 'Product_ID' in df_sale.columns: 
+        df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
 
 # ==========================================
 # 5. DIALOG FUNCTIONS
@@ -227,58 +256,65 @@ def show_history_dialog(fixed_product_id=None):
         if df_master.empty or df_po.empty:
             st.info("ไม่มีข้อมูลสินค้าหรือประวัติการสั่งซื้อ")
             return
-        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        selected_product = st.selectbox("🔍 ค้นหาสินค้า (ชื่อ/รหัส)", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...")
-        if selected_product:
-            selected_pid = selected_product.split(" : ")[0]
+        
+        # Safe access to Product_ID and Product_Name
+        if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
+            product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+            selected_product = st.selectbox("🔍 ค้นหาสินค้า (ชื่อ/รหัส)", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...")
+            if selected_product:
+                selected_pid = selected_product.split(" : ")[0]
+        else:
+            st.warning("ข้อมูล Master Sheet ไม่สมบูรณ์ (ขาด Product_ID หรือ Product_Name)")
+            return
     
     # แสดงข้อมูลเมื่อมี PID
     if selected_pid:
         # หาชื่อสินค้าเพื่อแสดงหัวข้อ
         product_name = ""
-        if not df_master.empty:
+        if not df_master.empty and 'Product_ID' in df_master.columns:
             match = df_master[df_master['Product_ID'] == selected_pid]
-            if not match.empty:
+            if not match.empty and 'Product_Name' in match.columns:
                 product_name = match.iloc[0]['Product_Name']
 
-        history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
-        if 'Sheet_Row_Index' in history_df.columns: history_df = history_df.drop(columns=['Sheet_Row_Index'])
-        
-        if not history_df.empty:
-            if 'Order_Date' in history_df.columns:
-                history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
-                history_df = history_df.sort_values(by='Order_Date', ascending=False)
-                history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
+        if 'Product_ID' in df_po.columns:
+            history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
+            if 'Sheet_Row_Index' in history_df.columns: history_df = history_df.drop(columns=['Sheet_Row_Index'])
+            
+            if not history_df.empty:
+                if 'Order_Date' in history_df.columns:
+                    history_df['Order_Date'] = pd.to_datetime(history_df['Order_Date'], errors='coerce')
+                    history_df = history_df.sort_values(by='Order_Date', ascending=False)
+                    history_df['Order_Date'] = history_df['Order_Date'].dt.strftime('%Y-%m-%d').fillna("-")
 
-            st.divider()
-            st.markdown(f"### {selected_pid} : {product_name}")
-            st.dataframe(
-                history_df,
-                column_config={
-                    "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
-                    "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
-                    "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
-                    "Wait_Date": st.column_config.NumberColumn("รอสินค้า (วัน)", format="%d", width="small"),
-                    "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
-                    "Transport_Weight": st.column_config.TextColumn("น้ำหนัก", width="medium"),
-                    "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
-                    "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                    "Yuan_Rate": st.column_config.NumberColumn("เรท", format="%.2f"),
-                    "Price_Unit_NoVAT": st.column_config.NumberColumn("ทุน/ชิ้น\n(No VAT)", format="%.2f"),
-                    "Price_1688_NoShip": st.column_config.NumberColumn("1688\n(ไม่ส่ง)", format="%.2f"),
-                    "Price_1688_WithShip": st.column_config.NumberColumn("1688\n(รวมส่ง)", format="%.2f"),
-                    "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f ¥"),
-                    "Shopee_Price": st.column_config.NumberColumn("Shopee", format="%.2f"),
-                    "TikTok_Price": st.column_config.NumberColumn("TikTok", format="%.2f"),
-                    "Fees": st.column_config.NumberColumn("Fees", format="%.2f"),
-                    "Transport_Type": st.column_config.TextColumn("ขนส่ง"),
-                },
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
-        else:
-            st.warning(f"สินค้านี้ ({selected_pid}) ยังไม่มีประวัติการสั่งซื้อ (PO)")
+                st.divider()
+                st.markdown(f"### {selected_pid} : {product_name}")
+                st.dataframe(
+                    history_df,
+                    column_config={
+                        "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
+                        "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
+                        "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
+                        "Wait_Date": st.column_config.NumberColumn("รอสินค้า (วัน)", format="%d", width="small"),
+                        "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
+                        "Transport_Weight": st.column_config.TextColumn("น้ำหนัก", width="medium"),
+                        "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                        "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                        "Yuan_Rate": st.column_config.NumberColumn("เรท", format="%.2f"),
+                        "Price_Unit_NoVAT": st.column_config.NumberColumn("ทุน/ชิ้น\n(No VAT)", format="%.2f"),
+                        "Price_1688_NoShip": st.column_config.NumberColumn("1688\n(ไม่ส่ง)", format="%.2f"),
+                        "Price_1688_WithShip": st.column_config.NumberColumn("1688\n(รวมส่ง)", format="%.2f"),
+                        "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f ¥"),
+                        "Shopee_Price": st.column_config.NumberColumn("Shopee", format="%.2f"),
+                        "TikTok_Price": st.column_config.NumberColumn("TikTok", format="%.2f"),
+                        "Fees": st.column_config.NumberColumn("Fees", format="%.2f"),
+                        "Transport_Type": st.column_config.TextColumn("ขนส่ง"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
+            else:
+                st.warning(f"สินค้านี้ ({selected_pid}) ยังไม่มีประวัติการสั่งซื้อ (PO)")
 
 @st.dialog("📝 จัดการรายการสั่งซื้อ", width="large")
 def po_form_dialog(mode="add"):
@@ -334,13 +370,17 @@ def po_form_dialog(mode="add"):
 
     # --- Prepare Data ---
     st.markdown("##### 1. ค้นหารหัสสินค้า")
-    product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-    default_idx = None
-    if mode == "search" and "Product_ID" in d:
-         matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]) + " :")]
-         if matches: default_idx = matches[0]
+    if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
+        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+        default_idx = None
+        if mode == "search" and "Product_ID" in d:
+             matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]) + " :")]
+             if matches: default_idx = matches[0]
 
-    selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed", key=f"{key_prefix}_product_select")
+        selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed", key=f"{key_prefix}_product_select")
+    else:
+        st.error("ไม่สามารถโหลดรายการสินค้าได้ (คอลัมน์ไม่ถูกต้อง)")
+        selected_option = None
     
     master_img_url = "https://via.placeholder.com/300x300.png?text=No+Image"
     master_pid = ""
@@ -349,8 +389,8 @@ def po_form_dialog(mode="add"):
     if selected_option:
         master_pid = selected_option.split(" : ")[0]
         row_info = df_master[df_master['Product_ID'] == master_pid].iloc[0]
-        master_name = row_info['Product_Name']
-        if row_info['Image']: master_img_url = row_info['Image']
+        if 'Product_Name' in row_info: master_name = row_info['Product_Name']
+        if 'Image' in row_info and row_info['Image']: master_img_url = row_info['Image']
 
     with st.container(border=True):
         col_left_img, col_right_form = st.columns([1.2, 3], gap="medium")
@@ -453,19 +493,23 @@ tab1, tab2, tab3 = st.tabs(["📈 รายงาน Stock", "📝 รายก�
 # TAB 1: Stock Report
 # ==========================================
 with tab1:
-    if not df_master.empty:
+    if not df_master.empty and 'Product_ID' in df_master.columns:
         df_po_latest = pd.DataFrame()
-        if not df_po.empty:
+        if not df_po.empty and 'Product_ID' in df_po.columns:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
         
         df_stock_report = pd.merge(df_master, df_po_latest, on='Product_ID', how='left')
         
         sales_map = {}
-        if not df_sale.empty:
+        if not df_sale.empty and 'Product_ID' in df_sale.columns:
             sales_summary = df_sale.groupby('Product_ID')['Qty_Sold'].sum().reset_index()
             sales_map = sales_summary.set_index('Product_ID')['Qty_Sold'].to_dict()
         
         df_stock_report['Qty_Sold'] = df_stock_report['Product_ID'].map(sales_map).fillna(0)
+        
+        # Check if Initial_Stock exists, if not use 0
+        if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
+        
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Qty_Sold']
         df_stock_report['Status'] = df_stock_report['Current_Stock'].apply(lambda x: "🔴 หมดเกลี้ยง" if x<=0 else ("⚠️ ใกล้หมด" if x<10 else "🟢 มีของ"))
 
@@ -499,7 +543,13 @@ with tab1:
         if st.session_state.filter_status and "📦 สินค้าทั้งหมด" not in st.session_state.filter_status:
             show_df = show_df[show_df['Status'].isin(st.session_state.filter_status)]
         if st.session_state.search_query:
-            show_df = show_df[show_df['Product_Name'].str.contains(st.session_state.search_query, case=False, na=False) | show_df['Product_ID'].str.contains(st.session_state.search_query, case=False, na=False)]
+            # Check column existence before searching
+            cond = pd.Series([False]*len(show_df), index=show_df.index)
+            if 'Product_Name' in show_df.columns:
+                cond = cond | show_df['Product_Name'].str.contains(st.session_state.search_query, case=False, na=False)
+            if 'Product_ID' in show_df.columns:
+                cond = cond | show_df['Product_ID'].str.contains(st.session_state.search_query, case=False, na=False)
+            show_df = show_df[cond]
 
         for col in ["Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", "Shopee_Price", "TikTok_Price", "Fees", "Qty_Sold", "Current_Stock"]:
              if col in show_df.columns: show_df[col] = pd.to_numeric(show_df[col], errors='coerce').fillna(0)
@@ -522,7 +572,7 @@ with tab1:
             },
             height=800, use_container_width=True, hide_index=True
         )
-    else: st.warning("ไม่พบข้อมูล Master Product")
+    else: st.warning("ไม่พบข้อมูล Master Product หรือข้อมูลไม่ถูกต้อง (ขาด Product_ID)")
 
 # ==========================================
 # TAB 2: Purchase Orders
@@ -546,7 +596,7 @@ with tab2:
     elif st.session_state.active_dialog == "search":
         po_form_dialog(mode="search")
 
-    if not df_po.empty:
+    if not df_po.empty and 'Product_ID' in df_po.columns and not df_master.empty and 'Product_ID' in df_master.columns:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
         if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
         st.data_editor(
@@ -554,7 +604,7 @@ with tab2:
             column_config={"Image": st.column_config.ImageColumn("รูปสินค้า", width=80)},
             height=700, use_container_width=True, hide_index=True, disabled=True 
         )
-    else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
+    else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ หรือ ข้อมูล Master Product ไม่พร้อม")
 
 # ==========================================
 # TAB 3: Daily Sales Report (Updated)
@@ -611,7 +661,7 @@ with tab3:
             # วันที่สิ้นสุด: ดึงค่าจาก State มาแสดง
             st.date_input("วันที่สิ้นสุด", key="m_d_end")
 
-    # 5. ประมวลผลข้อมูล (Logic เดิมแต่เปลี่ยนตัวแปรรับค่า)
+    # 5. ประมวลผลข้อมูล
     start_date = st.session_state.m_d_start
     end_date = st.session_state.m_d_end
     
@@ -619,8 +669,8 @@ with tab3:
         if start_date > end_date:
             st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
-            # --- ส่วนประมวลผล Dataframe (เหมือนเดิม) ---
-            if not df_sale.empty and 'Date_Only' in df_sale.columns:
+            # --- ส่วนประมวลผล Dataframe ---
+            if not df_sale.empty and 'Date_Only' in df_sale.columns and 'Product_ID' in df_sale.columns:
                 mask = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
                 df_sale_filtered = df_sale.loc[mask].copy()
                 
@@ -645,17 +695,29 @@ with tab3:
                     # Merge ข้อมูลสินค้า (ชื่อ, รูป)
                     df_pivot = df_pivot.reset_index()
                     
-                    # คำนวณ Stock ปัจจุบัน
-                    stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                    stock_map = {}
+                    if not df_master.empty and 'Initial_Stock' in df_master.columns:
+                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                    
                     all_time_sold = df_sale.groupby('Product_ID')['Qty_Sold'].sum().to_dict()
                     
-                    final_report = pd.merge(df_pivot, df_master[['Product_ID', 'Product_Name', 'Image']], on='Product_ID', how='left')
+                    # Merge and Prepare Final Report
+                    if not df_master.empty and 'Product_Name' in df_master.columns and 'Image' in df_master.columns:
+                        final_report = pd.merge(df_pivot, df_master[['Product_ID', 'Product_Name', 'Image']], on='Product_ID', how='left')
+                    else:
+                        final_report = df_pivot
+                        final_report['Product_Name'] = ""
+                        final_report['Image'] = ""
+
                     final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - all_time_sold.get(x, 0))
                     
                     # จัดเรียงคอลัมน์
                     fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range']
                     day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
-                    final_df = final_report[fixed_cols + day_cols]
+                    
+                    # Ensure columns exist before selecting
+                    available_fixed = [c for c in fixed_cols if c in final_report.columns]
+                    final_df = final_report[available_fixed + day_cols]
                     
                     st.divider()
                     st.markdown(f"**📊 แสดงผลข้อมูล: {start_date.strftime('%d/%m/%Y')} ถึง {end_date.strftime('%d/%m/%Y')}** ({len(final_df)} รายการ)")
@@ -687,4 +749,4 @@ with tab3:
                 else:
                     st.warning("⚠️ ไม่พบยอดขายในช่วงเวลาที่เลือก")
             else:
-                st.error("⚠️ ไม่พบไฟล์ข้อมูลการขาย (Sale Data) หรือรูปแบบไฟล์ไม่ถูกต้อง")
+                st.error("⚠️ ไม่พบข้อมูลการขาย (Sale Data) หรือ Master Data ไม่สมบูรณ์")
