@@ -523,7 +523,7 @@ with tab1:
         else:
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
                 
-                # 1. Get ALL data for the MAIN RANGE first (to build the full columns)
+                # 1. Get ALL data for the MAIN RANGE first
                 mask_range = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
                 df_sale_range = df_sale.loc[mask_range].copy()
                 
@@ -534,29 +534,24 @@ with tab1:
                     
                     pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                     
-                    # ✅ FORCE INT: Pivot Table (Full Range)
+                    # Force INT Pivot
                     df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
                     
-                    # 2. Apply Secondary Filter (Focus Date) -> Filter ROWS only
+                    # 2. Apply Secondary Filter
                     if use_focus_date and focus_date:
-                        # Find products that had sales on the focus_date
                         products_sold_on_focus = df_sale[
                             (df_sale['Date_Only'] == focus_date) & 
                             (df_sale['Qty_Sold'] > 0)
                         ]['Product_ID'].unique()
-                        
-                        # Filter the PIVOT table to keep only these products
                         df_pivot = df_pivot[df_pivot.index.isin(products_sold_on_focus)]
 
                     if df_pivot.empty:
-                        # --- แก้ไขจุดที่เกิด Error: แยก string ออกมาเพื่อไม่ให้ quote ตีกัน ---
                         msg_suffix = f"ในวันที่ {focus_date.strftime('%d/%m/%Y')}" if use_focus_date else "ในช่วงเวลาที่เลือก"
                         st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {msg_suffix}")
                     else:
                         sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data['Day_Col'].values else 0)
                         df_pivot = df_pivot[sorted_cols]
                         
-                        # ยอดรวมในช่วงที่เลือก (Force Int)
                         df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
                         
                         df_pivot = df_pivot.reset_index()
@@ -584,14 +579,29 @@ with tab1:
                         st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** {title_suffix} ({len(final_df)} รายการ)")
                         st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
 
-                        # สร้าง Config สำหรับ Dynamic Columns (วัน) ให้เป็นจำนวนเต็ม (Format %d)
+                        # Dynamic Columns Config
                         dynamic_col_config = {
                             col: st.column_config.NumberColumn(col, format="%d", width=60) 
                             for col in day_cols
                         }
 
+                        # ======================================================
+                        # 🎨 Styling Logic for Tab 1
+                        # ======================================================
+                        def style_rows_alternating(row):
+                            # สลับสี: แถวคู่ = สีดำ, แถวคี่ = สีเทาเข้ม
+                            bg_color = '#000000' if row.name % 2 == 0 else '#2e2e2e'
+                            # จัดกึ่งกลาง + ตัวหนังสือสีขาว
+                            return [f'background-color: {bg_color}; color: #ffffff; text-align: center; vertical-align: middle;' for _ in row]
+
+                        # 1. Apply พื้นหลังและจัดกึ่งกลาง
+                        styler = final_df.style.apply(style_rows_alternating, axis=1)
+                        # 2. Apply ตัวเลขติดลบสีแดง (ทับลงไปบนสีขาว)
+                        styler = styler.map(highlight_negative)
+                        # ======================================================
+
                         event = st.dataframe(
-                            final_df.style.map(highlight_negative),
+                            styler,
                             column_config={
                                 "Product_ID": st.column_config.TextColumn("รหัส", width=80),
                                 "Image": st.column_config.ImageColumn("รูป", width=60),
@@ -599,7 +609,7 @@ with tab1:
                                 "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70, help=f"ตัดยอดขายแค่วันที่ {latest_date_str}"),
                                 "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวมช่วงที่เลือก", format="%d", width=80),
                                 "Status": st.column_config.TextColumn("สถานะ", width=80),
-                                **dynamic_col_config # unpack dynamic columns config
+                                **dynamic_col_config
                             },
                             height=1500, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
                         )
