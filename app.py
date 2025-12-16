@@ -57,10 +57,7 @@ def get_credentials():
 
 # --- Helper: Highlight Negative Numbers Red ---
 def highlight_negative(val):
-    """
-    ฟังก์ชันสำหรับใส่สีแดงให้กับตัวเลขที่น้อยกว่า 0
-    ใช้กับ df.style.map()
-    """
+    """ใส่สีแดงให้กับตัวเลขที่น้อยกว่า 0"""
     if isinstance(val, (int, float)):
         if val < 0:
             return 'color: #ff4b4b; font-weight: bold;'
@@ -84,6 +81,11 @@ def get_stock_from_sheet():
             'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
+        
+        # Ensure integer for stock
+        if 'Initial_Stock' in df.columns:
+            df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
+            
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
@@ -100,6 +102,10 @@ def get_po_data():
         df = pd.DataFrame(data)
         if not df.empty:
             df['Sheet_Row_Index'] = range(2, len(df) + 2)
+            # Ensure integers for Qtys
+            for col in ['Qty_Ordered', 'Qty_Remaining']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
@@ -137,7 +143,8 @@ def get_sale_from_folder():
                 temp_df = temp_df.rename(columns={k:v for k,v in col_map.items() if k in temp_df.columns})
                 
                 if 'Qty_Sold' in temp_df.columns: 
-                    temp_df['Qty_Sold'] = pd.to_numeric(temp_df['Qty_Sold'], errors='coerce').fillna(0)
+                    # Convert to numeric first, then fillna, then to int
+                    temp_df['Qty_Sold'] = pd.to_numeric(temp_df['Qty_Sold'], errors='coerce').fillna(0).astype(int)
                 if 'Order_Time' in temp_df.columns:
                     temp_df['Order_Time'] = pd.to_datetime(temp_df['Order_Time'], errors='coerce')
                     temp_df['Date_Only'] = temp_df['Order_Time'].dt.date
@@ -273,7 +280,7 @@ if not df_sale.empty and 'Date_Only' in df_sale.columns:
     df_latest_sale = df_sale[df_sale['Date_Only'] == max_date]
     
     # 3. รวมยอดขายรายสินค้าของวันล่าสุด
-    recent_sales_map = df_latest_sale.groupby('Product_ID')['Qty_Sold'].sum().to_dict()
+    recent_sales_map = df_latest_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
 
 # ==========================================
 # 5. DIALOG FUNCTIONS
@@ -310,7 +317,7 @@ def show_history_dialog(fixed_product_id=None):
                 st.divider()
                 st.markdown(f"### {selected_pid} : {product_name}")
                 
-                # ✅ Apply Red Color to Negative Numbers
+                # ✅ Apply Red Color to Negative Numbers & Force Integers
                 st.dataframe(
                     history_df.style.map(highlight_negative), 
                     column_config={
@@ -408,8 +415,9 @@ def po_form_dialog(mode="add"):
             weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight") if mode=="search" else None, height=100, key=f"{kp}_w{selected_suffix}")
             
             r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-            qty_ord = r3c1.number_input("สั่งมา *", min_value=0.0, step=0.0, value=vn("Qty_Ordered"), key=f"{kp}_qord{selected_suffix}") 
-            qty_rem = r3c2.number_input("เหลือ *", min_value=0.0, step=0.0, value=vn("Qty_Remaining"), key=f"{kp}_qrem{selected_suffix}")
+            # Use step=1.0 for integers if you prefer, but here keeping standard number input
+            qty_ord = r3c1.number_input("สั่งมา *", min_value=0, step=1, value=int(vn("Qty_Ordered") or 0), key=f"{kp}_qord{selected_suffix}") 
+            qty_rem = r3c2.number_input("เหลือ *", min_value=0, step=1, value=int(vn("Qty_Remaining") or 0), key=f"{kp}_qrem{selected_suffix}")
             yuan_rate = r3c3.number_input("เรทหยวน *", min_value=0.0, step=0.0, format="%.2f", value=vn("Yuan_Rate"), key=f"{kp}_rate{selected_suffix}")
             fees = r3c4.number_input("ค่าธรรมเนียม", min_value=0.0, step=0.0, format="%.2f", value=vn("Fees"), key=f"{kp}_fee{selected_suffix}")
             
@@ -471,21 +479,25 @@ with tab1:
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
-    # --- FILTER SECTION ---
+    # --- FILTER SECTION (UPDATED UI) ---
     with st.container(border=True):
-        st.markdown("##### 🔍 ตัวกรองข้อมูล")
+        st.markdown("##### 🔍 ตั้งค่าการค้นหา")
         
-        # ✅ New Feature: Specific Date Filter
-        use_specific_date = st.checkbox("🎯 ค้นหาตามวันที่ขายจริง (Specific Sale Date)", key="filter_use_specific")
+        # ✅ Mode Selection: Use Radio for clarity instead of checkbox
+        filter_mode = st.radio(
+            "รูปแบบการกรอง:", 
+            ["ดูตามช่วงเวลา (เดือน/ปี)", "🎯 ระบุวันที่ขาย (Specific Date)"], 
+            horizontal=True,
+            label_visibility="collapsed"
+        )
         
-        if use_specific_date:
+        if filter_mode == "🎯 ระบุวันที่ขาย (Specific Date)":
             col_spec_date, _ = st.columns([1, 3])
             with col_spec_date:
-                specific_date = st.date_input("เลือกวันที่ขาย", value=today, key="filter_specific_date")
-            
-            # Override range logic
+                specific_date = st.date_input("เลือกวันที่ขายที่ต้องการ:", value=today, key="filter_specific_date")
             start_date = specific_date
             end_date = specific_date
+            use_specific_date = True
         else:
             c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
             with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
@@ -494,13 +506,13 @@ with tab1:
             with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
             start_date = st.session_state.m_d_start
             end_date = st.session_state.m_d_end
+            use_specific_date = False
     
     if start_date and end_date:
         if start_date > end_date: st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
                 
-                # ✅ FILTER LOGIC
                 if use_specific_date:
                     mask = df_sale['Date_Only'] == start_date
                 else:
@@ -514,13 +526,15 @@ with tab1:
                     df_sale_filtered['Day_Sort'] = df_sale_filtered['Order_Time'].dt.strftime('%Y%m%d')
                     
                     pivot_data = df_sale_filtered.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
-                    df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0)
+                    
+                    # ✅ FORCE INT: Pivot Table
+                    df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
                     
                     sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0])
                     df_pivot = df_pivot[sorted_cols]
                     
-                    # ยอดรวมในช่วงที่เลือก
-                    df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1)
+                    # ยอดรวมในช่วงที่เลือก (Force Int)
+                    df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
                     
                     df_pivot = df_pivot.reset_index()
                     stock_map = {}
@@ -532,9 +546,7 @@ with tab1:
                     else:
                         final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
 
-                    # ✅ ใช้วิธีคำนวณแบบเดิม: Stock = Master - ยอดขายวันล่าสุด (recent_sales_map)
-                    # หมายเหตุ: แม้จะเลือกวันที่ในอดีต แต่ "คงเหลือ" จะแสดงยอดปัจจุบันเสมอเพื่อให้ทราบสถานะสินค้าจริง
-                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
+                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
                     
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                     
@@ -548,7 +560,12 @@ with tab1:
                     st.markdown(f"**📊 แสดงผล: {filter_msg}** ({len(final_df)} รายการ)")
                     st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
 
-                    # ✅ Apply Red Color to Negative Numbers
+                    # สร้าง Config สำหรับ Dynamic Columns (วัน) ให้เป็นจำนวนเต็ม (Format %d)
+                    dynamic_col_config = {
+                        col: st.column_config.NumberColumn(col, format="%d", width=60) 
+                        for col in day_cols
+                    }
+
                     event = st.dataframe(
                         final_df.style.map(highlight_negative),
                         column_config={
@@ -558,6 +575,7 @@ with tab1:
                             "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70, help=f"ตัดยอดขายแค่วันที่ {latest_date_str}"),
                             "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวมช่วงที่เลือก", format="%d", width=80),
                             "Status": st.column_config.TextColumn("สถานะ", width=80),
+                            **dynamic_col_config # unpack dynamic columns config
                         },
                         height=600, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
                     )
@@ -589,7 +607,7 @@ with tab2:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
         if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
         
-        # ✅ Changed to st.dataframe to support RED Color Styling
+        # ✅ Force Integers for Display
         st.dataframe(
             df_po_display.style.map(highlight_negative),
             column_config={
@@ -624,23 +642,24 @@ with tab3:
         # ยอดขายรวมทั้งหมด (Total All Time)
         total_sales_map = {}
         if not df_sale.empty and 'Product_ID' in df_sale.columns:
-            total_sales_map = df_sale.groupby('Product_ID')['Qty_Sold'].sum().to_dict()
+            total_sales_map = df_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
         
         # ✅ ใช้ recent_sales_map (ยอดขายวันล่าสุด) เป็นตัวตัดสต็อก
-        df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0)
-        df_stock_report['Total_Sold_All'] = df_stock_report['Product_ID'].map(total_sales_map).fillna(0)
+        df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
+        df_stock_report['Total_Sold_All'] = df_stock_report['Product_ID'].map(total_sales_map).fillna(0).astype(int)
 
         if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
         
-        for col in ['Qty_Ordered', 'Initial_Stock', 'Recent_Sold', 'Total_Sold_All']:
+        # ✅ Ensure all quantities are integers
+        for col in ['Qty_Ordered', 'Initial_Stock']:
             if col in df_stock_report.columns:
-                df_stock_report[col] = pd.to_numeric(df_stock_report[col], errors='coerce').fillna(0)
+                df_stock_report[col] = pd.to_numeric(df_stock_report[col], errors='coerce').fillna(0).astype(int)
         
         # ✅ คำนวณคงเหลือ = Master - ขายล่าสุด
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
 
         if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
-        else: df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(10)
+        else: df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(10).astype(int)
 
         # --- 2. คำนวณสถานะ ---
         def calc_status(row):
@@ -693,9 +712,7 @@ with tab3:
         for c in ["PO_Number"]:
             if c not in edit_df.columns: edit_df[c] = ""
 
-        # หมายเหตุ: data_editor ไม่รองรับการทำ styling (สีแดง) ภายในเซลล์โดยตรง
-        # หากต้องการสีแดงต้องใช้ st.dataframe แต่จะแก้ไขค่าไม่ได้
-        # ดังนั้นหน้านี้จะคง data_editor ไว้เพื่อให้แก้ไขจุดเตือนได้ตามปกติ
+        # ✅ Force integers in st.data_editor display as well
         edited_df = st.data_editor(
             edit_df[final_cols],
             column_config={
@@ -708,7 +725,7 @@ with tab3:
                 "Qty_Ordered": st.column_config.NumberColumn("สั่งมา (POล่าสุด)", disabled=True, format="%d", width=100),
                 "PO_Number": st.column_config.TextColumn("เลข PO", disabled=True, width=100),
                 "Status": st.column_config.TextColumn("สถานะ", disabled=True, width=100),
-                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0, step=1, help="ใส่เลขเพื่อกำหนดจุดเตือน", width=130),
+                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0, step=1, format="%d", width=130),
             },
             height=600, use_container_width=True, hide_index=True, key="edited_stock_data"
         )
