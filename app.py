@@ -479,12 +479,20 @@ dialog_action = None
 dialog_data = None
 
 # ==========================================
-# TAB 1: Daily Sales Report (ฉบับสมบูรณ์ แก้ไขแล้ว)
+# TAB 1: Daily Sales Report (Modified with History Link)
 # ==========================================
-# ในส่วนของ Tab 1: Daily Sales Report
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
     
+    # --- 🛠️ ส่วนจัดการ Event จากลิงก์ HTML (ต้องอยู่บนสุดของ Tab) ---
+    # ตรวจสอบว่ามีการกดปุ่ม History มาจาก HTML Link หรือไม่
+    if "history_pid" in st.query_params:
+        hist_pid = st.query_params["history_pid"]
+        # ล้างค่าพารามิเตอร์เพื่อไม่ให้เปิดซ้ำเมื่อรีเฟรชหน้า
+        st.query_params.clear() 
+        # เรียกเปิด Dialog
+        show_history_dialog(fixed_product_id=hist_pid)
+
     thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", 
                    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
     today = date.today()
@@ -662,6 +670,12 @@ with tab1:
                         }
                         
                         /* คอลัมน์แบบต่างๆ */
+                        .col-history {
+                            width: 50px !important;
+                            min-width: 50px !important;
+                            max-width: 50px !important;
+                        }
+
                         .col-small { 
                             width: 70px !important; 
                             min-width: 70px !important; 
@@ -672,12 +686,6 @@ with tab1:
                             width: 90px !important; 
                             min-width: 90px !important; 
                             max-width: 90px !important; 
-                        }
-                        
-                        .col-wide { 
-                            width: 100px !important; 
-                            min-width: 100px !important; 
-                            max-width: 100px !important; 
                         }
                         
                         .col-image {
@@ -692,6 +700,17 @@ with tab1:
                             max-width: 200px !important;
                             text-align: left !important;
                         }
+
+                        /* Style สำหรับปุ่ม History Link */
+                        a.history-link {
+                            text-decoration: none;
+                            color: white;
+                            font-size: 16px;
+                            cursor: pointer;
+                        }
+                        a.history-link:hover {
+                            transform: scale(1.2);
+                        }
                     </style>
                     """, unsafe_allow_html=True)
                     
@@ -701,6 +720,7 @@ with tab1:
                         <table class="daily-sales-table">
                             <thead>
                                 <tr>
+                                    <th class="col-history">ประวัติ</th>
                                     <th class="col-small">รหัส</th>
                                     <th class="col-image">รูป</th>
                                     <th class="col-name">ชื่อสินค้า</th>
@@ -725,6 +745,17 @@ with tab1:
                         current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
                         
                         html_table += f'<tr>'
+                        
+                        # ➕ เพิ่มคอลัมน์ปุ่ม History (ใช้ Link URL Param)
+                        # target="_self" เพื่อให้เปิดในหน้าเดิมและ Trigger Python Logic ด้านบน
+                        html_table += f'''
+                            <td class="col-history">
+                                <a class="history-link" href="?history_pid={row["Product_ID"]}" target="_self" title="ดูประวัติการสั่งซื้อ">
+                                    📜
+                                </a>
+                            </td>
+                        '''
+
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
                         
                         # คอลัมน์รูปภาพ
@@ -763,37 +794,13 @@ with tab1:
                     # แสดงตาราง HTML
                     st.markdown(html_table, unsafe_allow_html=True)
                     
-                    # เก็บข้อมูลสำหรับ event handling (ถ้าจำเป็น)
-                    st.markdown("""
-                    <script>
-                    document.addEventListener('DOMContentLoaded', function() {
-                        const rows = document.querySelectorAll('.daily-sales-table tbody tr');
-                        rows.forEach(row => {
-                            row.addEventListener('click', function() {
-                                // ลบการเลือกจากแถวอื่น
-                                rows.forEach(r => r.classList.remove('selected-row'));
-                                // เลือกแถวนี้
-                                this.classList.add('selected-row');
-                            });
-                        });
-                    });
-                    
-                    <style>
-                    .daily-sales-table tbody tr.selected-row td {
-                        background-color: #2a5298 !important;
-                        color: white !important;
-                    }
-                    </style>
-                    """, unsafe_allow_html=True)
-                    
                 else:
                     msg_suffix = f"ในวันที่ {focus_date.strftime('%d/%m/%Y')}" if use_focus_date else "ในช่วงเวลาที่เลือก"
                     st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {msg_suffix}")
             else: 
                 st.error("⚠️ ไม่พบข้อมูลการขาย")
     else:
-        st.info("⚠️ กรุณาเลือกช่วงวันที่")
-# ==========================================
+        st.info("⚠️ กรุณาเลือกช่วงวันที่")# ==========================================
 # TAB 2: Purchase Orders
 # ==========================================
 with tab2:
