@@ -71,7 +71,6 @@ def get_stock_from_sheet():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- FIX: Mapping Columns (Thai -> English) ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'ID': 'Product_ID',
             'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
@@ -179,8 +178,11 @@ def save_po_to_sheet(data_row, row_index=None):
 st.title("📊 JST Hybrid Management System")
 
 # Initialize Session State
-if "active_dialog" not in st.session_state: st.session_state.active_dialog = None
 if "selected_product_history" not in st.session_state: st.session_state.selected_product_history = None
+
+# Init Filter States (ป้องกัน Error เวลา Rerun)
+if 'filter_status' not in st.session_state: st.session_state.filter_status = []
+if 'search_query' not in st.session_state: st.session_state.search_query = ""
 
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
@@ -204,7 +206,8 @@ def show_history_dialog(fixed_product_id=None):
             return
         if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
             product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-            selected_product = st.selectbox("🔍 ค้นหาสินค้า (ชื่อ/รหัส)", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...")
+            # เพิ่ม Key เพื่อป้องกันการชนกันของ Widget
+            selected_product = st.selectbox("🔍 ค้นหาสินค้า (ชื่อ/รหัส)", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...", key="history_search_box")
             if selected_product: selected_pid = selected_product.split(" : ")[0]
     
     if selected_pid:
@@ -248,11 +251,14 @@ def po_form_dialog(mode="add"):
     d = {}
     sheet_row_index = None
 
+    # ใช้ Key แยกตาม Mode เพื่อป้องกัน Cache ค่าเก่า
+    key_prefix = f"dialog_{mode}"
+
     if mode == "search":
         st.markdown("### 🔍 ค้นหา PO")
         if not df_po.empty: 
             po_map = {f"{row['PO_Number']} (สินค้า: {row['Product_ID']})": row for _, row in df_po.iterrows()}
-            selected_key = st.selectbox("เลือกรายการ PO", options=list(po_map.keys()), index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
+            selected_key = st.selectbox("เลือกรายการ PO", options=list(po_map.keys()), index=None, placeholder="พิมพ์เพื่อค้นหา PO...", key=f"{key_prefix}_select_po")
             if selected_key:
                 d = po_map[selected_key].to_dict()
                 if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
@@ -267,8 +273,6 @@ def po_form_dialog(mode="add"):
         for k in keys: st.session_state[k] = None
         st.session_state["add_order_date"] = date.today()
         st.session_state["add_recv_date"] = None
-
-    key_prefix = f"search_{sheet_row_index}" if mode == "search" and sheet_row_index else "add"
 
     if 'Product_ID' in df_master.columns and 'Product_Name' in df_master.columns:
         product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
@@ -339,23 +343,25 @@ def po_form_dialog(mode="add"):
                 if mode == "add": st.button("🧹 ล้าง", on_click=clear_form_data, key="btn_clear_data_bottom", type="secondary")
             with f_col3:
                 st.write(""); st.write("")
-                if st.button("✅ บันทึก" if mode == "add" else "💾 บันทึกทับ", type="primary", key="btn_submit_po"):
+                # Submit Button
+                if st.button("✅ บันทึก" if mode == "add" else "💾 บันทึกทับ", type="primary", key=f"btn_submit_po_{mode}"):
                     if not master_pid or not po_num or (qty_ord or 0) <= 0 or (total_yuan_input or 0) <= 0:
                         st.error("⚠️ ข้อมูลไม่ครบถ้วน (รหัสสินค้า, เลข PO, จำนวน, ยอดหยวน)")
                     else:
                         wait_days = (recv_date - order_date).days if order_date and recv_date else ""
                         new_row = [master_pid, po_num, order_date, recv_date, weight_txt, qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, p_1688_noship or 0, p_1688_ship or 0, total_yuan_input or 0, p_shopee or 0, p_tiktok or 0, fees or 0, transport, wait_days]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
-                            st.success("✅ บันทึกเรียบร้อย!"); time.sleep(1); st.rerun()
+                            st.success("✅ บันทึกเรียบร้อย!")
+                            time.sleep(1)
+                            st.rerun() # Rerun เพื่อปิด Dialog และอัปเดตข้อมูล
 
 # ==========================================
 # 6. TABS & UI LOGIC
 # ==========================================
-# 🛑 ปรับลำดับ Tab: 1. สรุปยอดขาย (Daily Sale), 2. PO, 3. รายงาน Stock
 tab1, tab2, tab3 = st.tabs(["📅 สรุปยอดขายรายวัน", "📝 รายการสั่งซื้อ", "📈 รายงาน Stock"])
 
 # ==========================================
-# TAB 1: Daily Sales Report (Moved here)
+# TAB 1: Daily Sales Report
 # ==========================================
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
@@ -419,11 +425,8 @@ with tab1:
                         final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
 
                     final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - all_time_sold.get(x, 0))
-                    
-                    # ✅ เพิ่ม Column "Status"
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                     
-                    # ✅ จัดเรียง Column: รหัส | รูป | ชื่อ | คงเหลือ | ยอดรวม | สถานะ | วันที่...
                     fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
                     day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
                     
@@ -442,7 +445,7 @@ with tab1:
                             "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=200),
                             "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70),
                             "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวม", format="%d", width=80),
-                            "Status": st.column_config.TextColumn("สถานะ", width=80), # ✅ Config Column Status
+                            "Status": st.column_config.TextColumn("สถานะ", width=80),
                         },
                         height=600, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
                     )
@@ -463,12 +466,11 @@ with tab2:
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): st.session_state.active_dialog = "add"; st.rerun()
+            # FIX: เรียก Dialog โดยตรง ไม่ต้องผ่าน state
+            if st.button("➕ เพิ่ม PO ใหม่", type="primary"): po_form_dialog(mode="add")
         with b2:
-            if st.button("🔍 ค้นหา & แก้ไข", type="secondary"): st.session_state.active_dialog = "search"; st.rerun()
-
-    if st.session_state.active_dialog == "add": po_form_dialog(mode="add")
-    elif st.session_state.active_dialog == "search": po_form_dialog(mode="search")
+            # FIX: เรียก Dialog โดยตรง
+            if st.button("🔍 ค้นหา & แก้ไข", type="secondary"): po_form_dialog(mode="search")
 
     if not df_po.empty and 'Product_ID' in df_po.columns and not df_master.empty and 'Product_ID' in df_master.columns:
         df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
@@ -481,7 +483,7 @@ with tab2:
     else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ หรือ ข้อมูล Master Product ไม่พร้อม")
 
 # ==========================================
-# TAB 3: Stock Report (Moved here)
+# TAB 3: Stock Report
 # ==========================================
 with tab3:
     st.subheader("📈 รายงาน Stock")
@@ -508,21 +510,22 @@ with tab3:
         with c3: st.markdown(f"""<div class="metric-card border-red"><div class="metric-title">ต้องเติมของ</div><div class="metric-value text-red">{len(df_stock_report[df_stock_report['Current_Stock'] < 10]):,}</div></div>""", unsafe_allow_html=True)
         
         st.divider()
-        if 'filter_status' not in st.session_state: st.session_state.filter_status = []
-        if 'search_query' not in st.session_state: st.session_state.search_query = ""
         
+        # UI Control ส่วนนี้ใช้ Session State ที่ Init ไว้ด้านบนสุด เพื่อความเสถียร
         col_f1, col_f2, col_b1, col_b2, col_b3 = st.columns([2, 2, 0.4, 0.5, 0.5])
         with col_f1: st.multiselect("กรองสถานะ", ["📦 สินค้าทั้งหมด", "🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], key="filter_status")
         with col_f2: st.text_input("ค้นหา (ชื่อ/รหัส)", key="search_query")
         with col_b1: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            # ใช้ Callback เพื่อเคลียร์ค่าอย่างปลอดภัย
             st.button("❌ ล้าง", on_click=lambda: [st.session_state.update({'filter_status':[], 'search_query':''})])
         with col_b2: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            # FIX: เรียก Dialog โดยตรง
             if st.button("📜 ประวัติ", type="secondary"): show_history_dialog()
         with col_b3: 
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            st.button("🔄", on_click=lambda: [st.cache_data.clear(), st.rerun()], type="primary")
+            st.button("🔄", on_click=lambda: [st.cache_data.clear()], type="primary")
 
         show_df = df_stock_report.copy()
         if st.session_state.filter_status and "📦 สินค้าทั้งหมด" not in st.session_state.filter_status:
