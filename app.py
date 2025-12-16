@@ -479,7 +479,7 @@ dialog_action = None
 dialog_data = None
 
 # ==========================================
-# TAB 1: Daily Sales Report
+# TAB 1: Daily Sales Report (ฉบับสมบูรณ์ - HTML Table + Popup)
 # ==========================================
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
@@ -504,8 +504,6 @@ with tab1:
     # --- FILTER SECTION ---
     with st.container(border=True):
         st.markdown("##### 🔍 ตัวกรองช่วงเวลา (Main Range)")
-        
-        # 1. Main Range Selector (X-Axis Columns)
         c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
         with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
         with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
@@ -513,11 +511,9 @@ with tab1:
         with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
         
         st.divider()
-        
-        # 2. Secondary Filter (Filter Rows/Products by Specific Sale Date)
         col_sec_check, col_sec_date = st.columns([2, 2])
         with col_sec_check:
-            st.write("") # Spacer
+            st.write("") 
             use_focus_date = st.checkbox("🔎 กรองเฉพาะสินค้าที่มียอดขายในวันที่...โปรดติก ✅ และเลือกวันที่", key="use_focus_date")
         
         focus_date = None
@@ -529,11 +525,12 @@ with tab1:
     end_date = st.session_state.m_d_end
     
     if start_date and end_date:
-        if start_date > end_date: st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
+        if start_date > end_date: 
+            st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
                 
-                # 1. Get ALL data for the MAIN RANGE first
+                # 1. Prepare Data
                 mask_range = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
                 df_sale_range = df_sale.loc[mask_range].copy()
                 
@@ -543,11 +540,8 @@ with tab1:
                     df_sale_range['Day_Sort'] = df_sale_range['Order_Time'].dt.strftime('%Y%m%d')
                     
                     pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
-                    
-                    # Force INT Pivot
                     df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
                     
-                    # 2. Apply Secondary Filter
                     if use_focus_date and focus_date:
                         products_sold_on_focus = df_sale[
                             (df_sale['Date_Only'] == focus_date) & 
@@ -561,10 +555,9 @@ with tab1:
                     else:
                         sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data['Day_Col'].values else 0)
                         df_pivot = df_pivot[sorted_cols]
-                        
                         df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
-                        
                         df_pivot = df_pivot.reset_index()
+                        
                         stock_map = {}
                         if not df_master.empty and 'Initial_Stock' in df_master.columns:
                             stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
@@ -575,72 +568,144 @@ with tab1:
                             final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
 
                         final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
-                        
                         final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                         
                         fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
                         day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
-                        available_fixed = [c for c in fixed_cols if c in final_report.columns]
-                        final_df = final_report[available_fixed + day_cols]
                         
+                        # สร้าง DataFrame สุดท้าย
+                        final_df = final_report[fixed_cols + day_cols].copy()
+                        
+                        # ======================================================
+                        # 🎨 เริ่มสร้างตารางแบบ HTML Hybrid (Custom Table)
+                        # ======================================================
                         st.divider()
+                        st.markdown(f"**📊 รายการสินค้า ({len(final_df)} รายการ)**")
+
+                        # 1. กำหนดสัดส่วนคอลัมน์ [ปุ่ม, รหัส, รูป, ชื่อ, คงเหลือ, ยอดขาย, สถานะ, ...วันต่างๆ]
+                        # ปรับตัวเลขที่นี่เพื่อขยาย/ลดความกว้างช่อง
+                        col_ratios = [0.6, 1.2, 0.8, 3.5, 1, 1.2, 1.2] + [0.8] * len(day_cols)
                         
-                        title_suffix = f" (กรองเฉพาะสินค้าที่ขายวันที่ {focus_date.strftime('%d/%m/%Y')})" if use_focus_date else ""
-                        st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** {title_suffix} ({len(final_df)} รายการ)")
-                        st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
+                        # 2. CSS สำหรับตาราง (หัวสีน้ำเงิน #1e3c72)
+                        st.markdown("""
+                        <style>
+                            .tbl-header { 
+                                background-color: #1e3c72; 
+                                color: white; 
+                                padding: 12px 5px; 
+                                text-align: center; 
+                                font-weight: bold; 
+                                border-right: 1px solid #ffffff30;
+                                font-size: 14px;
+                                height: 100%;
+                                display: flex; align-items: center; justify-content: center;
+                                margin-bottom: 5px;
+                            }
+                            .tbl-cell {
+                                padding: 8px 5px;
+                                text-align: center;
+                                font-size: 14px;
+                                display: flex; align-items: center; justify-content: center;
+                                height: 50px; 
+                                width: 100%;
+                            }
+                            /* ปรับปุ่มให้ดูสวยงาม */
+                            div[data-testid="stButton"] button {
+                                border: 1px solid #444;
+                                background-color: #333;
+                                color: white;
+                                padding: 0px;
+                                height: 35px;
+                                width: 100%;
+                                margin: 5px auto;
+                            }
+                            div[data-testid="stButton"] button:hover {
+                                border-color: #00d2ff;
+                                color: #00d2ff;
+                                background-color: #444;
+                            }
+                            div[data-testid="stButton"] button:active {
+                                background-color: #1e3c72;
+                                color: white;
+                            }
+                        </style>
+                        """, unsafe_allow_html=True)
 
-                        # Dynamic Columns Config
-                        dynamic_col_config = {
-                            col: st.column_config.NumberColumn(col, format="%d", width=60) 
-                            for col in day_cols
-                        }
+                        # 3. วาดหัวตาราง (Header Row)
+                        cols = st.columns(col_ratios)
+                        headers = ["ประวัติ", "รหัส", "รูป", "ชื่อสินค้า", "คงเหลือ", "ยอดขายรวม", "สถานะ"] + day_cols
+                        
+                        for i, h in enumerate(headers):
+                            # ใส่ Border Radius ที่หัวมุมซ้ายและขวา
+                            radius_style = "border-top-left-radius: 8px; border-bottom-left-radius: 8px;" if i==0 else ("border-top-right-radius: 8px; border-bottom-right-radius: 8px;" if i==len(headers)-1 else "")
+                            cols[i].markdown(f'<div class="tbl-header" style="{radius_style}">{h}</div>', unsafe_allow_html=True)
 
-                        # ======================================================
-                        # 🎨 Styling Logic for Tab 1 (UPDATED)
-                        # ======================================================
-                        def style_rows_custom(row):
-                            # 1. กำหนดสีพื้นหลัง (สลับสีเทาเข้ม / เทาเข้มกว่า)
-                            # #2e2e2e = เทาเข้ม, #1a1a1a = เทาเข้มมาก (เกือบดำ)
-                            bg_color = '#2e2e2e' if row.name % 2 == 0 else '#1a1a1a'
+                        # 4. ฟังก์ชันช่วยสร้าง HTML Cell
+                        def make_html(val, bg, is_img=False, align="center"):
+                            color = "#ffffff"
+                            weight = "normal"
+                            display_val = val
                             
-                            styles = []
-                            for val in row:
-                                # 2. กำหนดสีตัวอักษร
-                                text_color = '#ffffff' # ค่าปกติสีขาว
-                                weight = 'normal'
-                                
-                                # เช็คค่าติดลบ ให้เป็นสีแดง
-                                if isinstance(val, (int, float)) and val < 0:
-                                    text_color = '#ff4b4b'
-                                    weight = 'bold'
-                                
-                                # รวม Style ทั้งหมด
-                                styles.append(f'background-color: {bg_color}; color: {text_color}; font-weight: {weight}; text-align: center; vertical-align: middle;')
-                            return styles
+                            # Logic สีแดงถ้าติดลบ
+                            if isinstance(val, (int, float)):
+                                if val < 0: 
+                                    color = "#ff4b4b"
+                                    weight = "bold"
+                                display_val = f"{val:,}" # ใส่ comma
+                            
+                            # Logic รูปภาพ
+                            if is_img:
+                                if val and str(val).lower() != 'nan': 
+                                    return f'<div class="tbl-cell" style="background-color:{bg};"><img src="{val}" style="max-height:40px; border-radius:4px;"></div>'
+                                else: 
+                                    return f'<div class="tbl-cell" style="background-color:{bg};">-</div>'
+                            
+                            return f'<div class="tbl-cell" style="background-color:{bg}; color:{color}; font-weight:{weight}; justify-content:{align};">{display_val}</div>'
 
-                        # เรียกใช้ฟังก์ชันใหม่
-                        styler = final_df.style.apply(style_rows_custom, axis=1)
-                        # ไม่ต้องใช้ map(highlight_negative) แล้วเพราะรวมอยู่ในฟังก์ชันข้างบนแล้ว
-                        # ======================================================
-
-                        event = st.dataframe(
-                            styler,
-                            column_config={
-                                "Product_ID": st.column_config.TextColumn("รหัส", width=80),
-                                "Image": st.column_config.ImageColumn("รูป", width=60),
-                                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=200),
-                                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70, help=f"ตัดยอดขายแค่วันที่ {latest_date_str}"),
-                                "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวมช่วงที่เลือก", format="%d", width=80),
-                                "Status": st.column_config.TextColumn("สถานะ", width=80),
-                                **dynamic_col_config
-                            },
-                            height=1500, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
-                        )
-                        
-                        if event.selection and event.selection["rows"]:
-                            selected_idx = event.selection["rows"][0]
-                            dialog_data = final_df.iloc[selected_idx]['Product_ID']
-                            dialog_action = "history"
+                        # 5. วนลูปสร้างข้อมูล (Data Rows)
+                        for idx, row in final_df.iterrows():
+                            # คำนวณสีพื้นหลังสลับ (Zebra Striping)
+                            bg_color = "#2e2e2e" if idx % 2 == 0 else "#1c1c1c"
+                            
+                            c = st.columns(col_ratios)
+                            
+                            # [Col 0] ปุ่มประวัติ (Interactive Streamlit Button)
+                            with c[0]:
+                                # ใช้ markdown สร้างพื้นหลังให้เต็มช่องปุ่ม
+                                st.markdown(f"""
+                                    <div style="background-color:{bg_color}; height:50px; position:absolute; top:0; left:0; width:120%; z-index:-1; margin-left:-5px;"></div>
+                                """, unsafe_allow_html=True)
+                                if st.button("📜", key=f"btn_hist_{row['Product_ID']}", help=f"ดูประวัติ {row['Product_ID']}"):
+                                    show_history_dialog(fixed_product_id=row['Product_ID'])
+                            
+                            # [Col 1] รหัส
+                            c[1].markdown(make_html(row['Product_ID'], bg_color), unsafe_allow_html=True)
+                            
+                            # [Col 2] รูป
+                            c[2].markdown(make_html(row['Image'], bg_color, is_img=True), unsafe_allow_html=True)
+                            
+                            # [Col 3] ชื่อสินค้า (จัดชิดซ้ายแต่อยู่กลางบรรทัด - flex-start)
+                            c[3].markdown(make_html(row['Product_Name'], bg_color, align="center"), unsafe_allow_html=True)
+                            
+                            # [Col 4] คงเหลือ
+                            c[4].markdown(make_html(row['Current_Stock'], bg_color), unsafe_allow_html=True)
+                            
+                            # [Col 5] ยอดขายรวม
+                            c[5].markdown(make_html(row['Total_Sales_Range'], bg_color), unsafe_allow_html=True)
+                            
+                            # [Col 6] สถานะ
+                            c[6].markdown(make_html(row['Status'], bg_color), unsafe_allow_html=True)
+                            
+                            # [Col 7+] วันที่ต่างๆ (Dynamic Columns)
+                            for i, col_name in enumerate(day_cols):
+                                val = row[col_name]
+                                html_content = make_html(val, bg_color)
+                                # ทำให้เลข 0 สีจางลงเพื่อให้อ่านง่าย
+                                if val == 0: html_content = html_content.replace('color:#ffffff;', 'color:#555;')
+                                c[7+i].markdown(html_content, unsafe_allow_html=True)
+                            
+                            # เส้นคั่นบางๆ ระหว่างแถว (Optional)
+                            st.markdown(f"<div style='height:1px; background-color:#333; margin-top:-1px; position:relative; z-index:1;'></div>", unsafe_allow_html=True)
 
                 else: st.warning("⚠️ ไม่พบยอดขายใน **ช่วงเวลาหลัก (Main Range)** ที่เลือก")
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
