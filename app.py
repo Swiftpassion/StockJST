@@ -496,7 +496,7 @@ with tab1:
         col_sec_check, col_sec_date = st.columns([2, 2])
         with col_sec_check:
             st.write("") # Spacer
-            use_focus_date = st.checkbox("🔎 กรองเฉพาะสินค้าที่มียอดขายในวันที่... (Filter by Sold Date)", key="use_focus_date")
+            use_focus_date = st.checkbox("🔎 กรองเฉพาะสินค้าที่มียอดขายในวันที่...โปรดติก ✅ และเลือกวันที่", key="use_focus_date")
         
         focus_date = None
         if use_focus_date:
