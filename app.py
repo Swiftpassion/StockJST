@@ -285,7 +285,7 @@ if not df_sale.empty and 'Date_Only' in df_sale.columns:
 # ==========================================
 # 5. DIALOG FUNCTIONS
 # ==========================================
-@st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large") # แก้หัวข้อ Dialog เป็นไทย
+@st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
 def show_history_dialog(fixed_product_id=None):
     selected_pid = fixed_product_id
     if not selected_pid:
@@ -317,7 +317,7 @@ def show_history_dialog(fixed_product_id=None):
                 st.divider()
                 st.markdown(f"### {selected_pid} : {product_name}")
                 
-                # ✅ ปรับหัวตารางเป็นภาษาไทยทั้งหมด
+                # ✅ ปรับหัวตารางเป็นภาษาไทยทั้งหมด ตามที่คุณต้องการ
                 st.dataframe(
                     history_df.style.map(highlight_negative), 
                     column_config={
@@ -327,10 +327,20 @@ def show_history_dialog(fixed_product_id=None):
                         "Received_Date": st.column_config.TextColumn("วันที่ได้รับ", width="medium"),
                         "Qty_Ordered": st.column_config.NumberColumn("จำนวนสั่ง", format="%d"),
                         "Qty_Remaining": st.column_config.NumberColumn("ค้างส่ง", format="%d"),
-                        "Total_Yuan": st.column_config.NumberColumn("ยอดรวม (หยวน)", format="%.2f ¥"),
                         "Transport_Type": st.column_config.TextColumn("ขนส่งทาง"),
                         "Transport_Weight": st.column_config.TextColumn("รายละเอียด/นน."),
                         "Yuan_Rate": st.column_config.NumberColumn("เรทเงิน", format="%.2f"),
+                        
+                        # --- รายการที่เพิ่มและปรับปรุงชื่อ ---
+                        "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
+                        "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคาต่อชิ้นไม่รวม VAT", format="%.2f"),
+                        "Price_1688_NoShip": st.column_config.NumberColumn("ราคา1688/1 ชิ้น ไม่รวมค่าส่ง", format="%.2f"),
+                        "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น รวมค่าส่ง", format="%.2f"),
+                        "Shopee_Price": st.column_config.NumberColumn("ราคาในช้อปปี้", format="%.2f"),
+                        "TikTok_Price": st.column_config.NumberColumn("ราคาใน TIKTOK", format="%.2f"),
+                        "Fees": st.column_config.NumberColumn("ค่าธรรมเนียม", format="%.2f"),
+                        "Wait_Days": st.column_config.NumberColumn("ระยะเวลารอสินค้า", format="%d วัน"),
+                        "Wait_Date": st.column_config.NumberColumn("ระยะเวลารอสินค้า", format="%d วัน"), # เผื่อกรณีชื่อคอลัมน์ต่างกัน
                     },
                     use_container_width=True, hide_index=True, height=400
                 )
