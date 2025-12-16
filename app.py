@@ -371,7 +371,7 @@ with tab1:
             return f'color: {color}'
 
         display_columns = [
-            "Image", "Product_ID", "Product_Name", "PO_Number", "Order_Date", "Received_Date", 
+            "Product_ID", "Image", "Product_Name", "PO_Number", "Order_Date", "Received_Date", 
             "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", 
             "Price_Unit_NoVAT", "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan",
             "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Qty_Sold", "Current_Stock", "Status"
@@ -381,8 +381,9 @@ with tab1:
         st.dataframe(
             show_df[final_cols].style.map(color_negative_red, subset=['Current_Stock', 'Qty_Remaining']),
             column_config={
+                # สลับ config ให้ตรงกับลำดับคอลัมน์
+                "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
-                "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=COL_WIDTH),
                 "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=150), 
                 "PO_Number": st.column_config.TextColumn("เลข PO", width=COL_WIDTH),
                 "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width=COL_WIDTH),
