@@ -248,16 +248,25 @@ with tab1:
                 st.divider()
                 st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
                 
-                # [แก้ไข] เปลี่ยนหัวตารางใน Dialog ประวัติให้เป็นภาษาไทย
+                # [แก้ไขล่าสุด] ปรับหัวตารางเป็นภาษาไทยครบทุกคอลัมน์
                 st.dataframe(
                     history_df,
                     column_config={
+                        "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
                         "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
                         "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
                         "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
+                        "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
                         "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
                         "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                        "Yuan_Rate": st.column_config.NumberColumn("เรทหยวน", format="%.2f"),
+                        "Price_Unit_NoVAT": st.column_config.NumberColumn("ราคาต่อชิ้น\nไม่รวม VAT", format="%.2f"),
+                        "Price_1688_NoShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nไม่รวมค่าส่ง", format="%.2f"),
                         "Price_1688_WithShip": st.column_config.NumberColumn("ราคา 1688/1 ชิ้น\nรวมค่าส่ง", format="%.2f"),
+                        "Total_Yuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f ¥"),
+                        "Shopee_Price": st.column_config.NumberColumn("ราคาใน\nช้อปปี้", format="%.2f"),
+                        "TikTok_Price": st.column_config.NumberColumn("ราคาใน\nTIKTOK", format="%.2f"),
+                        "Fees": st.column_config.NumberColumn("ค่า\nธรรมเนียม", format="%.2f"),
                         "Transport_Type": st.column_config.TextColumn("การขนส่ง"),
                     },
                     use_container_width=True,
@@ -552,7 +561,7 @@ with tab2:
 
     # --- UI Logic ---
     col_head, col_action = st.columns([4, 2])
-    with col_head: st.subheader("📋 รายการสั่งซื้อสินค้า (PO Log)")
+    with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า")
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
