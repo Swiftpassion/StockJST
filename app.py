@@ -479,113 +479,123 @@ with tab1:
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
-    # --- FILTER SECTION (UPDATED UI) ---
+    # --- FILTER SECTION ---
     with st.container(border=True):
-        st.markdown("##### 🔍 ตั้งค่าการค้นหา")
+        st.markdown("##### 🔍 ตัวกรองช่วงเวลา (Main Range)")
         
-        # ✅ Mode Selection: Use Radio for clarity instead of checkbox
-        filter_mode = st.radio(
-            "รูปแบบการกรอง:", 
-            ["ดูตามช่วงเวลา (เดือน/ปี)", "🎯 ระบุวันที่ขาย (Specific Date)"], 
-            horizontal=True,
-            label_visibility="collapsed"
-        )
+        # 1. Main Range Selector (X-Axis Columns)
+        c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
+        with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
+        with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
+        with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
+        with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
         
-        if filter_mode == "🎯 ระบุวันที่ขาย (Specific Date)":
-            col_spec_date, _ = st.columns([1, 3])
-            with col_spec_date:
-                specific_date = st.date_input("เลือกวันที่ขายที่ต้องการ:", value=today, key="filter_specific_date")
-            start_date = specific_date
-            end_date = specific_date
-            use_specific_date = True
-        else:
-            c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
-            with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
-            with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
-            with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
-            with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
-            start_date = st.session_state.m_d_start
-            end_date = st.session_state.m_d_end
-            use_specific_date = False
+        st.divider()
+        
+        # 2. Secondary Filter (Filter Rows/Products by Specific Sale Date)
+        col_sec_check, col_sec_date = st.columns([2, 2])
+        with col_sec_check:
+            st.write("") # Spacer
+            use_focus_date = st.checkbox("🔎 กรองเฉพาะสินค้าที่มียอดขายในวันที่... (Filter by Sold Date)", key="use_focus_date")
+        
+        focus_date = None
+        if use_focus_date:
+            with col_sec_date:
+                focus_date = st.date_input("ระบุวันที่ขาย (Focus Date):", value=today, key="filter_focus_date")
+
+    start_date = st.session_state.m_d_start
+    end_date = st.session_state.m_d_end
     
     if start_date and end_date:
         if start_date > end_date: st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
                 
-                if use_specific_date:
-                    mask = df_sale['Date_Only'] == start_date
-                else:
-                    mask = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
+                # 1. Get ALL data for the MAIN RANGE first (to build the full columns)
+                mask_range = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
+                df_sale_range = df_sale.loc[mask_range].copy()
                 
-                df_sale_filtered = df_sale.loc[mask].copy()
-                
-                if not df_sale_filtered.empty:
+                if not df_sale_range.empty:
                     thai_abbr = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
-                    df_sale_filtered['Day_Col'] = df_sale_filtered['Order_Time'].apply(lambda x: f"{x.day} {thai_abbr[x.month]}")
-                    df_sale_filtered['Day_Sort'] = df_sale_filtered['Order_Time'].dt.strftime('%Y%m%d')
+                    df_sale_range['Day_Col'] = df_sale_range['Order_Time'].apply(lambda x: f"{x.day} {thai_abbr[x.month]}")
+                    df_sale_range['Day_Sort'] = df_sale_range['Order_Time'].dt.strftime('%Y%m%d')
                     
-                    pivot_data = df_sale_filtered.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
+                    pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                     
-                    # ✅ FORCE INT: Pivot Table
+                    # ✅ FORCE INT: Pivot Table (Full Range)
                     df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
                     
-                    sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0])
-                    df_pivot = df_pivot[sorted_cols]
-                    
-                    # ยอดรวมในช่วงที่เลือก (Force Int)
-                    df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
-                    
-                    df_pivot = df_pivot.reset_index()
-                    stock_map = {}
-                    if not df_master.empty and 'Initial_Stock' in df_master.columns:
-                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
-                    
-                    if not df_master.empty:
-                        final_report = pd.merge(df_pivot, df_master[['Product_ID', 'Product_Name', 'Image']], on='Product_ID', how='left')
+                    # 2. Apply Secondary Filter (Focus Date) -> Filter ROWS only
+                    if use_focus_date and focus_date:
+                        # Find products that had sales on the focus_date
+                        products_sold_on_focus = df_sale[
+                            (df_sale['Date_Only'] == focus_date) & 
+                            (df_sale['Qty_Sold'] > 0)
+                        ]['Product_ID'].unique()
+                        
+                        # Filter the PIVOT table to keep only these products
+                        df_pivot = df_pivot[df_pivot.index.isin(products_sold_on_focus)]
+
+                    if df_pivot.empty:
+                        st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {'ในช่วงเวลาที่เลือก' if not use_focus_date else f'ในวันที่ {focus_date.strftime('%d/%m/%Y')}'}")
                     else:
-                        final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
+                        sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data['Day_Col'].values else 0)
+                        df_pivot = df_pivot[sorted_cols]
+                        
+                        # ยอดรวมในช่วงที่เลือก (Force Int)
+                        df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
+                        
+                        df_pivot = df_pivot.reset_index()
+                        stock_map = {}
+                        if not df_master.empty and 'Initial_Stock' in df_master.columns:
+                            stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                        
+                        if not df_master.empty:
+                            final_report = pd.merge(df_pivot, df_master[['Product_ID', 'Product_Name', 'Image']], on='Product_ID', how='left')
+                        else:
+                            final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
 
-                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
-                    
-                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
-                    
-                    fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
-                    day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
-                    available_fixed = [c for c in fixed_cols if c in final_report.columns]
-                    final_df = final_report[available_fixed + day_cols]
-                    
-                    st.divider()
-                    filter_msg = f"วันที่ {start_date.strftime('%d/%m/%Y')}" if use_specific_date else f"{start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}"
-                    st.markdown(f"**📊 แสดงผล: {filter_msg}** ({len(final_df)} รายการ)")
-                    st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
+                        final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
+                        
+                        final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
+                        
+                        fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
+                        day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
+                        available_fixed = [c for c in fixed_cols if c in final_report.columns]
+                        final_df = final_report[available_fixed + day_cols]
+                        
+                        st.divider()
+                        
+                        title_suffix = f" (กรองเฉพาะสินค้าที่ขายวันที่ {focus_date.strftime('%d/%m/%Y')})" if use_focus_date else ""
+                        st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** {title_suffix} ({len(final_df)} รายการ)")
+                        st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
 
-                    # สร้าง Config สำหรับ Dynamic Columns (วัน) ให้เป็นจำนวนเต็ม (Format %d)
-                    dynamic_col_config = {
-                        col: st.column_config.NumberColumn(col, format="%d", width=60) 
-                        for col in day_cols
-                    }
+                        # สร้าง Config สำหรับ Dynamic Columns (วัน) ให้เป็นจำนวนเต็ม (Format %d)
+                        dynamic_col_config = {
+                            col: st.column_config.NumberColumn(col, format="%d", width=60) 
+                            for col in day_cols
+                        }
 
-                    event = st.dataframe(
-                        final_df.style.map(highlight_negative),
-                        column_config={
-                            "Product_ID": st.column_config.TextColumn("รหัส", width=80),
-                            "Image": st.column_config.ImageColumn("รูป", width=60),
-                            "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=200),
-                            "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70, help=f"ตัดยอดขายแค่วันที่ {latest_date_str}"),
-                            "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวมช่วงที่เลือก", format="%d", width=80),
-                            "Status": st.column_config.TextColumn("สถานะ", width=80),
-                            **dynamic_col_config # unpack dynamic columns config
-                        },
-                        height=600, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
-                    )
-                    
-                    if event.selection and event.selection["rows"]:
-                        selected_idx = event.selection["rows"][0]
-                        dialog_data = final_df.iloc[selected_idx]['Product_ID']
-                        dialog_action = "history"
+                        event = st.dataframe(
+                            final_df.style.map(highlight_negative),
+                            column_config={
+                                "Product_ID": st.column_config.TextColumn("รหัส", width=80),
+                                "Image": st.column_config.ImageColumn("รูป", width=60),
+                                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=200),
+                                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=70, help=f"ตัดยอดขายแค่วันที่ {latest_date_str}"),
+                                "Total_Sales_Range": st.column_config.NumberColumn("ยอดรวมช่วงที่เลือก", format="%d", width=80),
+                                "Status": st.column_config.TextColumn("สถานะ", width=80),
+                                **dynamic_col_config # unpack dynamic columns config
+                            },
+                            height=600, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
+                        )
+                        
+                        if event.selection and event.selection["rows"]:
+                            selected_idx = event.selection["rows"][0]
+                            dialog_data = final_df.iloc[selected_idx]['Product_ID']
+                            dialog_action = "history"
 
-                else: st.warning("⚠️ ไม่พบยอดขายในช่วงเวลาที่เลือก")
+                else: st.warning("⚠️ ไม่พบยอดขายใน **ช่วงเวลาหลัก (Main Range)** ที่เลือก")
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
 # ==========================================
