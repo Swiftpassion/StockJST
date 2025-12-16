@@ -61,45 +61,70 @@ def get_credentials():
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
 @st.cache_data(ttl=300)
-def get_stock_from_sheet():
+def get_sale_from_folder():
     try:
         creds = get_credentials()
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(MASTER_SHEET_ID)
-        ws = sh.worksheet(TAB_NAME_STOCK)
-        df = pd.DataFrame(ws.get_all_records())
-        col_map = {'รูปภาพ':'Image', 'รหัสสินค้า':'Product_ID', 'ชื่อสินค้า':'Product_Name', 'สินค้าคงคลัง':'Initial_Stock'}
-        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
-        if 'Initial_Stock' in df.columns:
-            df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-        return df
-    except Exception as e:
-        st.warning(f"⚠️ โหลด Master Sheet ไม่ทัน: {e}")
-        return pd.DataFrame()
+        service = build('drive', 'v3', credentials=creds)
+        
+        # 1. เปลี่ยน pageSize เป็น 100 เพื่อดึงมาหลายไฟล์
+        results = service.files().list(
+            q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false",
+            orderBy='modifiedTime desc', pageSize=100, fields="files(id, name)").execute()
+        
+        items = results.get('files', [])
+        if not items: return pd.DataFrame()
+        
+        all_dfs = [] # ลิสต์เก็บข้อมูลจากทุกไฟล์
 
-@st.cache_data(ttl=300)
-def get_po_data():
-    try:
-        creds = get_credentials()
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(MASTER_SHEET_ID)
-        try:
-            ws = sh.worksheet(TAB_NAME_PO)
-            data = ws.get_all_records()
-            expected_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
-                             "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
-                             "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
-                             "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Wait_Date"]
-            if not data: return pd.DataFrame(columns=expected_cols)
-            df = pd.DataFrame(data)
-            for col in expected_cols:
-                if col not in df.columns: df[col] = ""
-            df['Sheet_Row_Index'] = range(2, len(df) + 2) 
-            return df
-        except gspread.WorksheetNotFound:
+        # 2. วนลูปอ่านทุกไฟล์ที่เจอ
+        for item in items:
+            try:
+                file_id = item['id']
+                file_name = item['name']
+                
+                # ข้ามไฟล์ที่ไม่ใช่ Excel (เผื่อมีไฟล์ขยะ)
+                if not file_name.endswith(('.xlsx', '.xls')):
+                    continue
+
+                request = service.files().get_media(fileId=file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False: status, done = downloader.next_chunk()
+                fh.seek(0)
+                
+                # อ่านไฟล์
+                temp_df = pd.read_excel(fh)
+                
+                # Mapping Columns (ทำเหมือนเดิมแต่ทำทุกไฟล์)
+                col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
+                temp_df = temp_df.rename(columns={k:v for k,v in col_map.items() if k in temp_df.columns})
+                
+                # Clean Data แต่ละไฟล์
+                if 'Qty_Sold' in temp_df.columns: 
+                    temp_df['Qty_Sold'] = pd.to_numeric(temp_df['Qty_Sold'], errors='coerce').fillna(0)
+                
+                if 'Order_Time' in temp_df.columns:
+                    temp_df['Order_Time'] = pd.to_datetime(temp_df['Order_Time'], errors='coerce')
+                    temp_df['Date_Only'] = temp_df['Order_Time'].dt.date
+                
+                # เก็บใส่ลิสต์ถ้ามีข้อมูล
+                if not temp_df.empty:
+                    all_dfs.append(temp_df)
+                    
+            except Exception as file_err:
+                st.warning(f"⚠️ อ่านไฟล์ {item['name']} ไม่สำเร็จ: {file_err}")
+                continue
+
+        # 3. รวมทุกไฟล์เข้าด้วยกัน (Concatenate)
+        if all_dfs:
+            final_df = pd.concat(all_dfs, ignore_index=True)
+            return final_df
+        else:
             return pd.DataFrame()
+
     except Exception as e:
-        st.warning(f"⚠️ โหลด PO Data ไม่ทัน: {e}")
+        st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
 
 def save_po_to_sheet(data_row, row_index=None):
