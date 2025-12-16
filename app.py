@@ -381,7 +381,6 @@ with tab1:
         st.dataframe(
             show_df[final_cols].style.map(color_negative_red, subset=['Current_Stock', 'Qty_Remaining']),
             column_config={
-                # สลับ config ให้ตรงกับลำดับคอลัมน์
                 "Product_ID": st.column_config.TextColumn("รหัสสินค้า", width=100),
                 "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
                 "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", width=150), 
@@ -404,7 +403,9 @@ with tab1:
                 "Current_Stock": st.column_config.NumberColumn("คงเหลือ", format="%d", width=COL_WIDTH),
                 "Status": st.column_config.TextColumn("Status", width=COL_WIDTH),
             },
-            height=800,
+            # [แก้ไข] ปรับความสูงตรงนี้ครับ (เช่น 2300 สำหรับจอแนวตั้ง)
+            # ถ้าหัวตารางหาย ให้ลดตัวเลขนี้ลงมาให้พอดีกับความสูงจอของคุณครับ
+            height=2300, 
             use_container_width=True,
             hide_index=True
         )
