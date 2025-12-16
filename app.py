@@ -22,8 +22,18 @@ st.markdown("""
     .metric-title { color: #b0b0b0; font-size: 14px; font-weight: 500; margin-bottom: 5px; }
     .metric-value { color: #ffffff; font-size: 28px; font-weight: bold; }
     
-    /* Custom Header for Table */
-    [data-testid="stDataFrame"] th { text-align: center !important; background-color: #0047AB !important; color: white !important; vertical-align: middle !important; min-height: 60px; font-size: 14px; border-bottom: 2px solid #ffffff !important; }
+    /* --- แก้ไข CSS หัวตารางตรงนี้ --- */
+    [data-testid="stDataFrame"] th { 
+        text-align: center !important; 
+        background-color: #1e3c72 !important; /* เปลี่ยนเป็นสีน้ำเงินเข้มตามต้นฉบับ */
+        color: white !important; 
+        vertical-align: middle !important; 
+        min-height: 60px; 
+        font-size: 14px; 
+        border-bottom: 2px solid #ffffff !important; 
+    }
+    /* -------------------------------- */
+    
     [data-testid="stDataFrame"] th:first-child { border-top-left-radius: 8px; }
     [data-testid="stDataFrame"] th:last-child { border-top-right-radius: 8px; }
     [data-testid="stDataFrame"] td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
@@ -586,18 +596,31 @@ with tab1:
                         }
 
                         # ======================================================
-                        # 🎨 Styling Logic for Tab 1
+                        # 🎨 Styling Logic for Tab 1 (UPDATED)
                         # ======================================================
-                        def style_rows_alternating(row):
-                            # สลับสี: แถวคู่ = สีดำ, แถวคี่ = สีเทาเข้ม
-                            bg_color = '#000000' if row.name % 2 == 0 else '#2e2e2e'
-                            # จัดกึ่งกลาง + ตัวหนังสือสีขาว
-                            return [f'background-color: {bg_color}; color: #ffffff; text-align: center; vertical-align: middle;' for _ in row]
+                        def style_rows_custom(row):
+                            # 1. กำหนดสีพื้นหลัง (สลับสีเทาเข้ม / เทาเข้มกว่า)
+                            # #2e2e2e = เทาเข้ม, #1a1a1a = เทาเข้มมาก (เกือบดำ)
+                            bg_color = '#2e2e2e' if row.name % 2 == 0 else '#1a1a1a'
+                            
+                            styles = []
+                            for val in row:
+                                # 2. กำหนดสีตัวอักษร
+                                text_color = '#ffffff' # ค่าปกติสีขาว
+                                weight = 'normal'
+                                
+                                # เช็คค่าติดลบ ให้เป็นสีแดง
+                                if isinstance(val, (int, float)) and val < 0:
+                                    text_color = '#ff4b4b'
+                                    weight = 'bold'
+                                
+                                # รวม Style ทั้งหมด
+                                styles.append(f'background-color: {bg_color}; color: {text_color}; font-weight: {weight}; text-align: center; vertical-align: middle;')
+                            return styles
 
-                        # 1. Apply พื้นหลังและจัดกึ่งกลาง
-                        styler = final_df.style.apply(style_rows_alternating, axis=1)
-                        # 2. Apply ตัวเลขติดลบสีแดง (ทับลงไปบนสีขาว)
-                        styler = styler.map(highlight_negative)
+                        # เรียกใช้ฟังก์ชันใหม่
+                        styler = final_df.style.apply(style_rows_custom, axis=1)
+                        # ไม่ต้องใช้ map(highlight_negative) แล้วเพราะรวมอยู่ในฟังก์ชันข้างบนแล้ว
                         # ======================================================
 
                         event = st.dataframe(
