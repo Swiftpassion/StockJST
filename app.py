@@ -52,14 +52,23 @@ st.markdown("""
     .text-gold { color: #ffd700 !important; }
     .text-red  { color: #ff4d4d !important; }
     
-    /* Table Headers: จัดกึ่งกลาง + รองรับการขึ้นบรรทัดใหม่ */
+    /* ============================================================
+       [แก้ไข] ส่วนตกแต่งหัวตาราง (Table Headers)
+       ============================================================ */
     [data-testid="stDataFrame"] th { 
-        text-align: center !important;
+        text-align: center !important;      /* 1. จัดกึ่งกลาง */
+        background-color: #0047AB !important; /* 2. ใส่สีพื้นหลังน้ำเงิน (Cobalt Blue) */
+        color: white !important;            /* เปลี่ยนสีตัวอักษรเป็นขาวให้อ่านง่าย */
         white-space: pre-wrap !important; 
         vertical-align: middle !important;
         min-height: 60px;
-        font-size: 13px;
+        font-size: 14px;
+        border-bottom: 2px solid #ffffff !important; /* เพิ่มเส้นขอบล่างสีขาวให้ดูมีมิติ */
     }
+    
+    /* แก้ไขมุมโค้งของหัวตารางซ้ายสุด/ขวาสุด (Optional: เพื่อความสวยงาม) */
+    [data-testid="stDataFrame"] th:first-child { border-top-left-radius: 8px; }
+    [data-testid="stDataFrame"] th:last-child { border-top-right-radius: 8px; }
 
     /* Table Cells: บังคับตัดคำเป็น ... ถ้าล้น */
     [data-testid="stDataFrame"] td {
