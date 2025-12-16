@@ -135,14 +135,23 @@ def get_po_data():
         try:
             ws = sh.worksheet(TAB_NAME_PO)
             data = ws.get_all_records()
-            # [แก้ไข] เพิ่ม Wait_Date ใน Columns List
-            columns = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
-                       "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
-                       "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
-                       "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Wait_Date"]
+            
+            # กำหนด Columns มาตรฐาน
+            expected_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", 
+                             "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Price_Unit_NoVAT", 
+                             "Price_1688_NoShip", "Price_1688_WithShip", "Total_Yuan", 
+                             "Shopee_Price", "TikTok_Price", "Fees", "Transport_Type", "Wait_Date"]
+            
             if not data:
-                 return pd.DataFrame(columns=columns)
+                 return pd.DataFrame(columns=expected_cols)
+            
             df = pd.DataFrame(data)
+            
+            # เติม Columns ที่ขาดหายไป (กรณี Sheet เก่าไม่มี Wait_Date)
+            for col in expected_cols:
+                if col not in df.columns:
+                    df[col] = ""
+                    
             df['Sheet_Row_Index'] = range(2, len(df) + 2) 
             return df
         except gspread.WorksheetNotFound:
@@ -168,7 +177,6 @@ def save_po_to_sheet(data_row, row_index=None):
                 formatted_row.append(item)
                 
         if row_index:
-            # [แก้ไข] เปลี่ยน Range จาก P เป็น Q เพื่อรองรับ Wait_Date
             range_name = f"A{row_index}:Q{row_index}" 
             ws.update(range_name, [formatted_row])
         else:
@@ -245,7 +253,6 @@ def show_history_dialog():
 
     if selected_product:
         selected_pid = selected_product.split(" : ")[0]
-        # [แก้ไข] สร้าง copy และ drop Sheet_Row_Index เพื่อไม่ให้แสดงในตาราง
         history_df = df_po[df_po['Product_ID'] == selected_pid].copy()
         if 'Sheet_Row_Index' in history_df.columns:
             history_df = history_df.drop(columns=['Sheet_Row_Index'])
@@ -259,14 +266,13 @@ def show_history_dialog():
             st.divider()
             st.markdown(f"**รายการสั่งซื้อของ:** `{selected_product}` ({len(history_df)} รายการ)")
             
-            # [แก้ไข] เพิ่ม Wait_Date ลงใน config และจัดลำดับ
             st.dataframe(
                 history_df,
                 column_config={
                     "Product_ID": st.column_config.TextColumn("รหัสสินค้า"),
                     "PO_Number": st.column_config.TextColumn("เลข PO", width="medium"),
                     "Order_Date": st.column_config.TextColumn("วันที่สั่ง", width="medium"),
-                    "Wait_Date": st.column_config.NumberColumn("จำนวนวันที่รอสินค้า", format="%d วัน", width="small"), # เพิ่มช่องนี้
+                    "Wait_Date": st.column_config.NumberColumn("จำนวนวันที่รอสินค้า", format="%d วัน", width="small"),
                     "Received_Date": st.column_config.TextColumn("ของมา", width="medium"),
                     "Transport_Weight": st.column_config.TextColumn("น้ำหนักขนส่ง", width="medium"),
                     "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
@@ -294,24 +300,28 @@ def po_form_dialog(mode="add"):
     d = {}
     sheet_row_index = None
     
+    # --- ส่วนค้นหา (เฉพาะโหมด Search) ---
     if mode == "search":
         st.markdown("### 🔍 ค้นหา PO ที่ต้องการแก้ไข")
         if not df_po.empty: 
-            po_choices = df_po.apply(lambda x: f"{x['PO_Number']} ({x['Product_ID']})", axis=1).tolist()
-            selected_po_str = st.selectbox("เลือกเลข PO", po_choices, index=None, placeholder="พิมพ์เพื่อค้นหา PO...")
+            # ใช้วิธี Map Key แทน Split เพื่อความแม่นยำ 100%
+            po_map = {f"{row['PO_Number']} (สินค้า: {row['Product_ID']})": row for _, row in df_po.iterrows()}
             
-            if selected_po_str:
-                sel_po = selected_po_str.split(" (")[0]
-                sel_pid = selected_po_str.split(" (")[1].replace(")", "")
-                found_row = df_po[(df_po['PO_Number'] == sel_po) & (df_po['Product_ID'] == sel_pid)]
-                
-                if not found_row.empty:
-                    d = found_row.iloc[0].to_dict()
+            selected_key = st.selectbox(
+                "เลือกรายการ PO", 
+                options=list(po_map.keys()), 
+                index=None, 
+                placeholder="พิมพ์เพื่อค้นหา PO..."
+            )
+            
+            if selected_key:
+                d = po_map[selected_key].to_dict()
+                # ตรวจสอบว่ามี Sheet_Row_Index หรือไม่ (กัน Error)
+                if 'Sheet_Row_Index' in d:
                     sheet_row_index = int(d['Sheet_Row_Index'])
-                    st.success(f"พบข้อมูล PO: {sel_po}")
-                    st.divider()
+                    st.success(f"โหลดข้อมูล: {selected_key}")
                 else:
-                    st.error("ไม่พบข้อมูล")
+                    st.error("ไม่พบข้อมูล Index ของแถว กรุณากดอัพเดตข้อมูลหลัก")
                     return
             else:
                 st.info("กรุณาเลือก PO ที่ต้องการแก้ไข")
@@ -319,16 +329,29 @@ def po_form_dialog(mode="add"):
         else:
             st.warning("ยังไม่มีข้อมูล PO ในระบบ")
             return
+    
+    # --- ปุ่มล้างข้อมูล (เฉพาะโหมด Add) ---
+    if mode == "add":
+        col_head_1, col_head_2 = st.columns([3, 1])
+        with col_head_1:
+            st.markdown(f"#### เพิ่มรายการใหม่")
+        with col_head_2:
+            if st.button("🧹 ล้างข้อมูล (Reset)", key="btn_clear_form"):
+                st.rerun()
 
-    form_title = "เพิ่มรายการใหม่" if mode == "add" else f"แก้ไขรายการ: {d.get('PO_Number')}"
-    st.markdown(f"#### {form_title}")
+    elif mode == "search":
+        st.markdown(f"#### ✏️ แก้ไขรายการ: {d.get('PO_Number', '-')}")
+        st.divider()
 
     st.markdown("##### 1. ค้นหารหัสสินค้า")
     product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
     
     default_idx = None
+    # Auto-select product in Search Mode
     if mode == "search" and "Product_ID" in d:
-         matches = [i for i, opt in enumerate(product_options) if opt.startswith(str(d["Product_ID"]))]
+         # ใช้ str comparison เพื่อความชัวร์
+         target_pid = str(d["Product_ID"])
+         matches = [i for i, opt in enumerate(product_options) if opt.startswith(target_pid + " :")]
          if matches: default_idx = matches[0]
 
     selected_option = st.selectbox("ระบุสินค้า", product_options, index=default_idx, placeholder="🔍 Search...", label_visibility="collapsed")
@@ -368,7 +391,6 @@ def po_form_dialog(mode="add"):
                 def_recv_date = get_date_val(d.get("Received_Date"))
                 
                 order_date = r1c2.date_input("วันที่สั่ง", value=def_order_date)
-                # [แก้ไข] ช่อง "ของมา" สามารถปล่อยว่างได้ (value=None)
                 recv_date = r1c3.date_input("ของมา (ประมาณ)", value=def_recv_date)
                 
                 weight_txt = st.text_area("📦 น้ำหนักขนส่ง / รายละเอียด *", value=d.get("Transport_Weight", ""), height=100, placeholder="เช่น โกดังใหม่ 3 ลัง 54.99 kg...")
@@ -423,12 +445,11 @@ def po_form_dialog(mode="add"):
                     
                     if errors: st.error(f"⚠️ บันทึกไม่ได้: {', '.join(errors)}")
                     else:
-                        # [แก้ไข] คำนวณ Wait_Date (จำนวนวันที่รอสินค้า)
+                        # คำนวณ Wait_Date (จำนวนวันที่รอสินค้า)
                         wait_days = ""
                         if order_date and recv_date:
                             wait_days = (recv_date - order_date).days
                         
-                        # [แก้ไข] เพิ่ม wait_days ลงใน List ข้อมูลที่จะบันทึก
                         new_row = [
                             master_pid, po_num, order_date, recv_date, weight_txt, 
                             qty_ord or 0, qty_rem or 0, yuan_rate or 0, p_no_vat or 0, 
@@ -438,7 +459,8 @@ def po_form_dialog(mode="add"):
                         ]
                         if save_po_to_sheet(new_row, row_index=sheet_row_index): 
                             st.success("✅ บันทึกเรียบร้อย! ข้อมูลถูกส่งไปที่ Google Sheet แล้ว")
-                            st.caption("(คุณสามารถปิดหน้าต่างนี้ หรือแก้ไขข้อมูลต่อได้เลย)")
+                            if mode == "add":
+                                st.caption("กดปุ่ม 'ล้างข้อมูล' ด้านบนเพื่อกรอกรายการต่อไป")
 
 # ==========================================
 # 6. TABS & UI LOGIC
