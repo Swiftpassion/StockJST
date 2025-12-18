@@ -88,13 +88,19 @@ def get_stock_from_sheet():
             'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
             'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
             'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock',
-            'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit'
+            'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit',
+            # --- เพิ่มส่วนอ่าน Type ---
+            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
         # Ensure integer for stock
         if 'Initial_Stock' in df.columns:
             df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
+            
+        # ถ้าไม่มีคอลัมน์ Type ให้สร้างขึ้นมาและใส่ค่าว่างไว้กัน Error
+        if 'Product_Type' not in df.columns:
+            df['Product_Type'] = "ทั่วไป"
             
         return df
     except Exception as e:
@@ -479,18 +485,15 @@ dialog_action = None
 dialog_data = None
 
 # ==========================================
-# TAB 1: Daily Sales Report (Modified with History Link)
+# TAB 1: Daily Sales Report (Modified)
 # ==========================================
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
     
     # --- 🛠️ ส่วนจัดการ Event จากลิงก์ HTML (ต้องอยู่บนสุดของ Tab) ---
-    # ตรวจสอบว่ามีการกดปุ่ม History มาจาก HTML Link หรือไม่
     if "history_pid" in st.query_params:
         hist_pid = st.query_params["history_pid"]
-        # ล้างค่าพารามิเตอร์เพื่อไม่ให้เปิดซ้ำเมื่อรีเฟรชหน้า
         st.query_params.clear() 
-        # เรียกเปิด Dialog
         show_history_dialog(fixed_product_id=hist_pid)
 
     thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", 
@@ -510,11 +513,11 @@ with tab1:
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
-    # --- FILTER SECTION ---
+    # --- FILTER SECTION (แก้ไขใหม่ เพิ่ม Type และ Choose options) ---
     with st.container(border=True):
-        st.markdown("##### 🔍 ตัวกรองช่วงเวลา (Main Range)")
+        st.markdown("##### 🔍 ตัวกรองข้อมูล")
         
-        # 1. Main Range Selector (X-Axis Columns)
+        # แถวที่ 1: วันที่ (เหมือนเดิม)
         c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
         with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
         with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
@@ -523,16 +526,25 @@ with tab1:
         
         st.divider()
         
-        # 2. Secondary Filter (Filter Rows/Products by Specific Sale Date)
-        col_sec_check, col_sec_date = st.columns([2, 2])
-        with col_sec_check:
-            st.write("") # Spacer
-            use_focus_date = st.checkbox("🔎 กรองเฉพาะสินค้าที่มียอดขายในวันที่...โปรดติก ✅ และเลือกวันที่", key="use_focus_date")
+        # แถวที่ 2: เพิ่ม หมวดหมู่ และ เลือกสินค้า
+        col_cat, col_sku = st.columns([1.5, 3])
         
-        focus_date = None
-        if use_focus_date:
-            with col_sec_date:
-                focus_date = st.date_input("ระบุวันที่ขาย (Focus Date):", value=today, key="filter_focus_date")
+        # 1. เตรียมตัวเลือกหมวดหมู่
+        category_options = ["แสดงทั้งหมด"]
+        if not df_master.empty and 'Product_Type' in df_master.columns:
+            unique_types = sorted(df_master['Product_Type'].astype(str).unique().tolist())
+            category_options += unique_types
+            
+        # 2. เตรียมตัวเลือกสินค้า
+        sku_options = []
+        if not df_master.empty:
+            sku_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+
+        with col_cat:
+            selected_category = st.selectbox("หมวดหมู่สินค้า", category_options, key="filter_category")
+            
+        with col_sku:
+            selected_skus = st.multiselect("รายการที่เลือก (Choose options):", sku_options, key="filter_skus")
 
     start_date = st.session_state.m_d_start
     end_date = st.session_state.m_d_end
@@ -556,252 +568,124 @@ with tab1:
                     df_sale_range['Day_Sort'] = df_sale_range['Order_Time'].dt.strftime('%Y%m%d')
                     
                     pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
-                    
-                    # Force INT Pivot
                     df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
-                    
-                    # 2. Apply Secondary Filter
-                    if use_focus_date and focus_date:
-                        products_sold_on_focus = df_sale[
-                            (df_sale['Date_Only'] == focus_date) & 
-                            (df_sale['Qty_Sold'] > 0)
-                        ]['Product_ID'].unique()
-                        df_pivot = df_pivot[df_pivot.index.isin(products_sold_on_focus)]
 
                 # แสดงผลตารางถ้ามีข้อมูล
-                if not df_pivot.empty and len(df_pivot) > 0:
-                    sorted_cols = sorted(df_pivot.columns, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data['Day_Col'].values else 0)
-                    df_pivot = df_pivot[sorted_cols]
+                if not df_pivot.empty or not df_master.empty:
                     
-                    df_pivot['Total_Sales_Range'] = df_pivot.sum(axis=1).astype(int)
-                    
-                    df_pivot = df_pivot.reset_index()
-                    stock_map = {}
-                    if not df_master.empty and 'Initial_Stock' in df_master.columns:
-                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
-                    
-                    if not df_master.empty:
-                        final_report = pd.merge(df_pivot, df_master[['Product_ID', 'Product_Name', 'Image']], on='Product_ID', how='left')
+                    # Merge กับ Master เพื่อเอาข้อมูล Type, Name, Image
+                    if not df_pivot.empty:
+                        df_pivot = df_pivot.reset_index()
+                        final_report = pd.merge(df_master, df_pivot, on='Product_ID', how='left')
                     else:
-                        final_report = df_pivot; final_report['Product_Name'] = ""; final_report['Image'] = ""
+                        final_report = df_master.copy()
+                    
+                    # เติม 0 ในคอลัมน์ยอดขายที่เป็น NaN
+                    day_cols = [c for c in final_report.columns if c not in df_master.columns]
+                    final_report[day_cols] = final_report[day_cols].fillna(0).astype(int)
+                    
+                    # --- 🚀 APPLY FILTERS ---
+                    # 1. กรองตามหมวดหมู่
+                    if selected_category != "แสดงทั้งหมด":
+                        final_report = final_report[final_report['Product_Type'] == selected_category]
+                        
+                    # 2. กรองตามรายการที่เลือก
+                    if selected_skus:
+                        selected_ids = [item.split(" : ")[0] for item in selected_skus]
+                        final_report = final_report[final_report['Product_ID'].isin(selected_ids)]
+                    
+                    if final_report.empty:
+                        st.warning("⚠️ ไม่พบข้อมูลสินค้าตามเงื่อนไขที่เลือก")
+                    else:
+                        # คำนวณยอดรวมและสต็อกคงเหลือ
+                        final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
+                        
+                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                        final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
+                        final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
+                        
+                        sorted_day_cols = sorted(day_cols, key=lambda x: pivot_data[pivot_data['Day_Col'] == x]['Day_Sort'].values[0] if not pivot_data.empty and x in pivot_data['Day_Col'].values else 0)
+                        
+                        fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Product_Type', 'Current_Stock', 'Total_Sales_Range', 'Status']
+                        available_fixed = [c for c in fixed_cols if c in final_report.columns]
+                        final_df = final_report[available_fixed + sorted_day_cols]
+                        
+                        st.divider()
+                        st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** | หมวดหมู่: {selected_category} ({len(final_df)} รายการ)")
+                        st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
 
-                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
-                    
-                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
-                    
-                    fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Current_Stock', 'Total_Sales_Range', 'Status']
-                    day_cols = [c for c in final_report.columns if c not in fixed_cols and c in sorted_cols]
-                    available_fixed = [c for c in fixed_cols if c in final_report.columns]
-                    final_df = final_report[available_fixed + day_cols]
-                    
-                    st.divider()
-                    
-                    title_suffix = f" (กรองเฉพาะสินค้าที่ขายวันที่ {focus_date.strftime('%d/%m/%Y')})" if use_focus_date else ""
-                    st.markdown(f"**📊 แสดงผล: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}** {title_suffix} ({len(final_df)} รายการ)")
-                    st.caption(f"ℹ️ คงเหลือ = Master Stock - ยอดขายล่าสุด ({latest_date_str})")
-
-                    # ===============================================
-                    # 🎨 แสดงตารางด้วย HTML/CSS แบบ REPORT_DAILY
-                    # ===============================================
-                    
-                    # CSS สำหรับตาราง Daily Sales Report
-                    st.markdown("""
-                    <style>
-                        /* CSS สำหรับตาราง Daily Sales Report */
-                        .daily-sales-table-wrapper {
-                            overflow: auto;
-                            width: 100%;
-                            max-height: 800px;
-                            margin-top: 10px;
-                            background: #1c1c1c;
-                            border-radius: 8px;
-                            border: 1px solid #444;
-                        }
+                        # CSS สำหรับตาราง
+                        st.markdown("""
+                        <style>
+                            .daily-sales-table-wrapper { overflow: auto; width: 100%; max-height: 800px; margin-top: 10px; background: #1c1c1c; border-radius: 8px; border: 1px solid #444; }
+                            .daily-sales-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: 'Sarabun', sans-serif; font-size: 11px; color: #ddd; }
+                            .daily-sales-table th, .daily-sales-table td { padding: 4px 6px; line-height: 1.2; text-align: center; border-bottom: 1px solid #333; border-right: 1px solid #333; white-space: nowrap; vertical-align: middle; }
+                            .daily-sales-table thead th { position: sticky; top: 0; z-index: 100; background-color: #1e3c72 !important; color: white !important; font-weight: 700; border-bottom: 2px solid #ffffff !important; min-height: 40px; }
+                            .daily-sales-table tbody tr:nth-child(even) td { background-color: #262626 !important; }
+                            .daily-sales-table tbody tr:nth-child(odd) td { background-color: #1c1c1c !important; }
+                            .daily-sales-table tbody tr:hover td { background-color: #333 !important; }
+                            .negative-value { color: #FF0000 !important; font-weight: bold !important; }
+                            
+                            .col-history { width: 50px !important; min-width: 50px !important; }
+                            .col-small { width: 70px !important; min-width: 70px !important; }
+                            .col-medium { width: 90px !important; min-width: 90px !important; }
+                            .col-image { width: 60px !important; min-width: 60px !important; }
+                            .col-name { width: 200px !important; min-width: 200px !important; text-align: left !important; }
+                            a.history-link { text-decoration: none; color: white; font-size: 16px; cursor: pointer; }
+                            a.history-link:hover { transform: scale(1.2); }
+                        </style>
+                        """, unsafe_allow_html=True)
                         
-                        .daily-sales-table {
-                            width: 100%;
-                            min-width: 1000px;
-                            border-collapse: separate;
-                            border-spacing: 0;
-                            font-family: 'Sarabun', sans-serif;
-                            font-size: 11px;
-                            color: #ddd;
-                        }
+                        html_table = """
+                        <div class="daily-sales-table-wrapper">
+                            <table class="daily-sales-table">
+                                <thead>
+                                    <tr>
+                                        <th class="col-history">ประวัติ</th>
+                                        <th class="col-small">รหัส</th>
+                                        <th class="col-image">รูป</th>
+                                        <th class="col-name">ชื่อสินค้า</th>
+                                        <th class="col-small">คงเหลือ</th>
+                                        <th class="col-medium">ยอดรวมช่วงที่เลือก</th>
+                                        <th class="col-medium">สถานะ</th>
+                        """
+                        for day_col in sorted_day_cols:
+                            html_table += f'<th class="col-small">{day_col}</th>'
                         
-                        .daily-sales-table th, 
-                        .daily-sales-table td {
-                            padding: 4px 6px;
-                            line-height: 1.2;
-                            text-align: center;
-                            border-bottom: 1px solid #333;
-                            border-right: 1px solid #333;
-                            white-space: nowrap;
-                            vertical-align: middle;
-                        }
+                        html_table += "</tr></thead><tbody>"
                         
-                        .daily-sales-table thead th {
-                            position: sticky;
-                            top: 0;
-                            z-index: 100;
-                            background-color: #1e3c72 !important;  /* สีน้ำเงินเข้ม */
-                            color: white !important;
-                            font-weight: 700;
-                            border-bottom: 2px solid #ffffff !important;
-                            min-height: 40px;
-                        }
+                        for idx, row in final_df.iterrows():
+                            current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
+                            html_table += f'<tr>'
+                            html_table += f'<td class="col-history"><a class="history-link" href="?history_pid={row["Product_ID"]}" target="_self">📜</a></td>'
+                            html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
+                            
+                            if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
+                                html_table += f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>'
+                            else:
+                                html_table += f'<td class="col-image"></td>'
+                                
+                            html_table += f'<td class="col-name" title="{row.get("Product_Name","")}">{row.get("Product_Name","")}</td>'
+                            html_table += f'<td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>'
+                            html_table += f'<td class="col-medium">{row["Total_Sales_Range"]}</td>'
+                            html_table += f'<td class="col-medium">{row["Status"]}</td>'
+                            
+                            for day_col in sorted_day_cols:
+                                day_value = row.get(day_col, 0)
+                                day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
+                                html_table += f'<td class="col-small {day_class}">{int(day_value) if isinstance(day_value, (int, float)) else day_value}</td>'
+                            
+                            html_table += '</tr>'
                         
-                        /* สีพื้นหลังแถวสลับกัน */
-                        .daily-sales-table tbody tr:nth-child(even) td {
-                            background-color: #262626 !important;  /* เทาเข้ม */
-                        }
-                        
-                        .daily-sales-table tbody tr:nth-child(odd) td {
-                            background-color: #1c1c1c !important;  /* เทาเข้มมาก */
-                        }
-                        
-                        .daily-sales-table tbody tr:hover td {
-                            background-color: #333 !important;
-                        }
-                        
-                        /* ค่าติดลบสีแดง */
-                        .negative-value {
-                            color: #FF0000 !important;
-                            font-weight: bold !important;
-                        }
-                        
-                        /* คอลัมน์แบบต่างๆ */
-                        .col-history {
-                            width: 50px !important;
-                            min-width: 50px !important;
-                            max-width: 50px !important;
-                        }
-
-                        .col-small { 
-                            width: 70px !important; 
-                            min-width: 70px !important; 
-                            max-width: 70px !important; 
-                        }
-                        
-                        .col-medium { 
-                            width: 90px !important; 
-                            min-width: 90px !important; 
-                            max-width: 90px !important; 
-                        }
-                        
-                        .col-image {
-                            width: 60px !important;
-                            min-width: 60px !important;
-                            max-width: 60px !important;
-                        }
-                        
-                        .col-name {
-                            width: 200px !important;
-                            min-width: 200px !important;
-                            max-width: 200px !important;
-                            text-align: left !important;
-                        }
-
-                        /* Style สำหรับปุ่ม History Link */
-                        a.history-link {
-                            text-decoration: none;
-                            color: white;
-                            font-size: 16px;
-                            cursor: pointer;
-                        }
-                        a.history-link:hover {
-                            transform: scale(1.2);
-                        }
-                    </style>
-                    """, unsafe_allow_html=True)
-                    
-                    # สร้าง HTML table
-                    html_table = """
-                    <div class="daily-sales-table-wrapper">
-                        <table class="daily-sales-table">
-                            <thead>
-                                <tr>
-                                    <th class="col-history">ประวัติ</th>
-                                    <th class="col-small">รหัส</th>
-                                    <th class="col-image">รูป</th>
-                                    <th class="col-name">ชื่อสินค้า</th>
-                                    <th class="col-small">คงเหลือ</th>
-                                    <th class="col-medium">ยอดรวมช่วงที่เลือก</th>
-                                    <th class="col-medium">สถานะ</th>
-                    """
-                    
-                    # เพิ่มหัวคอลัมน์วันที่
-                    for day_col in day_cols:
-                        html_table += f'<th class="col-small">{day_col}</th>'
-                    
-                    html_table += """
-                                </tr>
-                            </thead>
-                            <tbody>
-                    """
-                    
-                    # เพิ่มข้อมูลแต่ละแถว
-                    for idx, row in final_df.iterrows():
-                        # กำหนดคลาสสำหรับค่าติดลบใน Current_Stock
-                        current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
-                        
-                        html_table += f'<tr>'
-                        
-                        # ➕ เพิ่มคอลัมน์ปุ่ม History (ใช้ Link URL Param)
-                        # target="_self" เพื่อให้เปิดในหน้าเดิมและ Trigger Python Logic ด้านบน
-                        html_table += f'''
-                            <td class="col-history">
-                                <a class="history-link" href="?history_pid={row["Product_ID"]}" target="_self" title="ดูประวัติการสั่งซื้อ">
-                                    📜
-                                </a>
-                            </td>
-                        '''
-
-                        html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
-                        
-                        # คอลัมน์รูปภาพ
-                        if pd.notna(row.get('Image')) and row['Image'] != "" and isinstance(row['Image'], str) and row['Image'].startswith('http'):
-                            html_table += f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>'
-                        else:
-                            html_table += f'<td class="col-image"></td>'
-                        
-                        # คอลัมน์ชื่อสินค้า
-                        product_name = str(row.get('Product_Name', '')) if pd.notna(row.get('Product_Name')) else ""
-                        html_table += f'<td class="col-name" title="{product_name}">{product_name}</td>'
-                        
-                        # คอลัมน์ Current_Stock (แสดงสีแดงถ้าติดลบ)
-                        html_table += f'<td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>'
-                        
-                        # คอลัมน์ Total_Sales_Range
-                        html_table += f'<td class="col-medium">{row["Total_Sales_Range"]}</td>'
-                        
-                        # คอลัมน์ Status
-                        html_table += f'<td class="col-medium">{row["Status"]}</td>'
-                        
-                        # คอลัมน์วันที่ (ข้อมูลยอดขายรายวัน)
-                        for day_col in day_cols:
-                            day_value = row.get(day_col, 0)
-                            day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
-                            html_table += f'<td class="col-small {day_class}">{int(day_value) if isinstance(day_value, (int, float)) else day_value}</td>'
-                        
-                        html_table += '</tr>'
-                    
-                    html_table += """
-                            </tbody>
-                        </table>
-                    </div>
-                    """
-                    
-                    # แสดงตาราง HTML
-                    st.markdown(html_table, unsafe_allow_html=True)
-                    
-                else:
-                    msg_suffix = f"ในวันที่ {focus_date.strftime('%d/%m/%Y')}" if use_focus_date else "ในช่วงเวลาที่เลือก"
-                    st.warning(f"⚠️ ไม่พบสินค้าที่มียอดขาย {msg_suffix}")
+                        html_table += "</tbody></table></div>"
+                        st.markdown(html_table, unsafe_allow_html=True)
             else: 
                 st.error("⚠️ ไม่พบข้อมูลการขาย")
     else:
-        st.info("⚠️ กรุณาเลือกช่วงวันที่")# ==========================================
-# TAB 2: Purchase Orders
+        st.info("⚠️ กรุณาเลือกช่วงวันที่")
+
+# ==========================================
+# TAB 2: Purchase Orders (Modified)
 # ==========================================
 with tab2:
     col_head, col_action = st.columns([4, 2])
@@ -815,27 +699,104 @@ with tab2:
             if st.button("🔍 ค้นหา & แก้ไข", type="secondary", key="btn_search_po_tab2"): 
                 dialog_action = "po_search"
 
-    if not df_po.empty and 'Product_ID' in df_po.columns and not df_master.empty:
-        df_po_display = pd.merge(df_po, df_master[['Product_ID', 'Image']], on='Product_ID', how='left')
-        if "Image" in df_po_display.columns: df_po_display["Image"] = df_po_display["Image"].fillna("").astype(str)
+    if not df_po.empty and not df_master.empty:
         
-        # ✅ Force Integers for Display
-        st.dataframe(
-            df_po_display.style.map(highlight_negative),
-            column_config={
-                "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
-                "PO_Number": st.column_config.TextColumn("เลข PO"),
-                "Product_ID": st.column_config.TextColumn("รหัส"),
-                "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
-                "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
-                "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f"),
-                "Order_Date": st.column_config.TextColumn("วันที่สั่ง"),
-                "Received_Date": st.column_config.TextColumn("วันที่รับ"),
-            },
-            column_order=["Image", "Product_ID", "PO_Number", "Order_Date", "Received_Date", "Transport_Weight", "Qty_Ordered", "Qty_Remaining", "Yuan_Rate", "Total_Yuan", "Transport_Type"],
-            height=700, use_container_width=True, hide_index=True 
-        )
-    else: st.info("ยังไม่มีข้อมูลใบสั่งซื้อ")
+        # 1. เตรียมข้อมูลสำหรับการกรอง (Merge Master เพื่อเอา Type และ Image)
+        df_po_filter = df_po.copy()
+        if 'Order_Date' in df_po_filter.columns:
+            df_po_filter['Order_Date'] = pd.to_datetime(df_po_filter['Order_Date'], errors='coerce')
+        
+        # Merge กับ Master
+        cols_to_use = ['Product_ID', 'Product_Name', 'Image', 'Product_Type']
+        valid_cols = [c for c in cols_to_use if c in df_master.columns]
+        
+        df_display = pd.merge(df_po_filter, df_master[valid_cols], on='Product_ID', how='left')
+        
+        if "Image" in df_display.columns: df_display["Image"] = df_display["Image"].fillna("").astype(str)
+        if "Product_Type" in df_display.columns: df_display["Product_Type"] = df_display["Product_Type"].fillna("ทั่วไป")
+        else: df_display["Product_Type"] = "ทั่วไป"
+
+        # --- 2. ส่วนแสดงตัวกรอง (Filter Section) ---
+        with st.container(border=True):
+            st.markdown("##### 🔍 ตัวกรองรายการสั่งซื้อ")
+            
+            today = date.today()
+            all_years = [today.year - i for i in range(3)]
+            thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", 
+                           "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+
+            def update_po_dates():
+                y = st.session_state.po_y
+                m_index = thai_months.index(st.session_state.po_m) + 1
+                _, last_day = calendar.monthrange(y, m_index)
+                st.session_state.po_d_start = date(y, m_index, 1)
+                st.session_state.po_d_end = date(y, m_index, last_day)
+
+            if "po_d_start" not in st.session_state: st.session_state.po_d_start = date(today.year, today.month, 1)
+            if "po_d_end" not in st.session_state: 
+                _, last_day = calendar.monthrange(today.year, today.month)
+                st.session_state.po_d_end = date(today.year, today.month, last_day)
+
+            # แถวที่ 1: ตัวกรองวันที่
+            c1, c2, c3, c4 = st.columns([1, 1.5, 1.5, 1.5])
+            with c1: st.selectbox("ปี", all_years, key="po_y", on_change=update_po_dates)
+            with c2: st.selectbox("เดือน", thai_months, index=today.month-1, key="po_m", on_change=update_po_dates)
+            with c3: st.date_input("วันที่เริ่มต้น", key="po_d_start")
+            with c4: st.date_input("วันที่สิ้นสุด", key="po_d_end")
+
+            st.divider()
+
+            # แถวที่ 2: หมวดหมู่ และ เลือกสินค้า
+            col_cat, col_sku = st.columns([1.5, 3])
+            
+            cat_opts = ["แสดงทั้งหมด"] + sorted(df_display['Product_Type'].astype(str).unique().tolist())
+            sku_opts = df_master.apply(lambda x: f"{x['Product_ID']} : {x.get('Product_Name', '')}", axis=1).tolist()
+
+            with col_cat:
+                sel_cat_po = st.selectbox("หมวดหมู่สินค้า", cat_opts, key="po_cat_filter")
+            with col_sku:
+                sel_skus_po = st.multiselect("รายการที่เลือก (Choose options):", sku_opts, key="po_sku_filter")
+
+        # --- 3. ประมวลผลการกรอง (Apply Filters) ---
+        mask_date = (df_display['Order_Date'].dt.date >= st.session_state.po_d_start) & \
+                    (df_display['Order_Date'].dt.date <= st.session_state.po_d_end)
+        df_final = df_display[mask_date].copy()
+
+        if sel_cat_po != "แสดงทั้งหมด":
+            df_final = df_final[df_final['Product_Type'] == sel_cat_po]
+
+        if sel_skus_po:
+            selected_ids = [s.split(" : ")[0] for s in sel_skus_po]
+            df_final = df_final[df_final['Product_ID'].isin(selected_ids)]
+
+        # --- 4. แสดงผลตาราง ---
+        if not df_final.empty:
+            if 'Order_Date' in df_final.columns:
+                df_final['Order_Date'] = df_final['Order_Date'].dt.strftime('%Y-%m-%d')
+            
+            st.markdown(f"**แสดงผล:** {len(df_final)} รายการ")
+            
+            st.dataframe(
+                df_final.style.map(highlight_negative),
+                column_config={
+                    "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
+                    "PO_Number": st.column_config.TextColumn("เลข PO"),
+                    "Product_ID": st.column_config.TextColumn("รหัส"),
+                    "Product_Name": st.column_config.TextColumn("ชื่อสินค้า"),
+                    "Qty_Ordered": st.column_config.NumberColumn("สั่งมา", format="%d"),
+                    "Qty_Remaining": st.column_config.NumberColumn("เหลือ", format="%d"),
+                    "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f"),
+                    "Order_Date": st.column_config.TextColumn("วันที่สั่ง"),
+                    "Received_Date": st.column_config.TextColumn("วันที่รับ"),
+                    "Product_Type": st.column_config.TextColumn("หมวดหมู่"),
+                },
+                column_order=["Image", "Product_ID", "Product_Name", "Product_Type", "PO_Number", "Order_Date", "Qty_Ordered", "Qty_Remaining", "Total_Yuan", "Transport_Type"],
+                height=700, use_container_width=True, hide_index=True 
+            )
+        else:
+            st.warning("⚠️ ไม่พบรายการสั่งซื้อตามเงื่อนไขที่เลือก")
+    else: 
+        st.info("ยังไม่มีข้อมูลใบสั่งซื้อ หรือ ข้อมูล Master Product ไม่สมบูรณ์")
 
 # ==========================================
 # TAB 3: Stock Report (Interactive Mode + Filters)
