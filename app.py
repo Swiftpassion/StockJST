@@ -83,24 +83,34 @@ def get_stock_from_sheet():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
+        # --- 1. Clean Headers (ลบช่องว่างหัวตารางกัน Error) ---
+        df.columns = df.columns.astype(str).str.strip()
+        
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'ID': 'Product_ID',
             'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
             'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
-            'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock',
+            'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock', 'คงเหลือ': 'Initial_Stock',
             'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit',
-            # --- เพิ่มส่วนอ่าน Type ---
             'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
-        # Ensure integer for stock
-        if 'Initial_Stock' in df.columns:
-            df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
+        # --- 2. Failsafe: ถ้าไม่มีคอลัมน์ Stock ให้สร้างขึ้นมาเป็น 0 เพื่อกัน App พัง ---
+        if 'Initial_Stock' not in df.columns:
+            # st.warning("⚠️ ไม่พบคอลัมน์ 'Stock' หรือ 'จำนวน' ใน Sheet Master ระบบจะถือว่าเป็น 0")
+            df['Initial_Stock'] = 0
             
-        # ถ้าไม่มีคอลัมน์ Type ให้สร้างขึ้นมาและใส่ค่าว่างไว้กัน Error
-        if 'Product_Type' not in df.columns:
-            df['Product_Type'] = "ทั่วไป"
+        if 'Product_ID' not in df.columns:
+             # กรณีแย่ที่สุดถ้าไม่เจอ Product_ID เลย
+             df['Product_ID'] = "Unknown"
+
+        # สร้างคอลัมน์อื่นๆ ที่จำเป็นถ้าไม่มี
+        if 'Product_Name' not in df.columns: df['Product_Name'] = df['Product_ID']
+        if 'Product_Type' not in df.columns: df['Product_Type'] = "ทั่วไป"
+        
+        # --- 3. แปลงค่าตัวเลข ---
+        df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
             
         return df
     except Exception as e:
