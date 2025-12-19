@@ -18,7 +18,6 @@ st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="�
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
-    .metric-card { background-color: #1a1a1a; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
     
     /* --- CSS ตาราง --- */
     [data-testid="stDataFrame"] th { 
@@ -62,12 +61,6 @@ def get_credentials():
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
 
-def highlight_negative(val):
-    if isinstance(val, (int, float)):
-        if val < 0:
-            return 'color: #ff4b4b; font-weight: bold;'
-    return ''
-
 @st.cache_data(ttl=300)
 def get_stock_from_sheet():
     try:
@@ -110,6 +103,40 @@ def get_po_data():
         ws = sh.worksheet(TAB_NAME_PO)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
+        
+        # --- FIX: Rename Columns (Thai -> English) ---
+        # ป้องกัน KeyError โดยการเปลี่ยนชื่อไทยให้เป็นชื่อที่ระบบรู้จักทันที
+        col_map = {
+            'รหัสสินค้า': 'Product_ID', 'SKU': 'Product_ID',
+            'เลข PO': 'PO_Number', 'PO Number': 'PO_Number',
+            'ขนส่ง': 'Transport',
+            'วันที่สั่งซื้อ': 'Order_Date', 'Order Date': 'Order_Date',
+            'วันที่ได้รับ': 'Received_Date', 'Received Date': 'Received_Date',
+            'ระยะเวลา': 'Wait_Days',
+            'จำนวน': 'Qty', 'Qty': 'Qty',
+            'ราคา/ชิ้น': 'Unit_Cost_THB',
+            'ราคา (หยวน)': 'Total_Yuan',
+            'ราคา (บาท)': 'Total_THB',
+            'เรทเงิน': 'Ex_Rate', 'Exchange Rate': 'Ex_Rate',
+            'เรทค่าขนส่ง': 'Ship_Rate', 'Shipping Rate': 'Ship_Rate',
+            'ขนาด (คิว)': 'CBM',
+            'ค่าส่ง': 'Ship_Cost',
+            'น้ำหนัก / KG': 'Weight', 'Weight': 'Weight',
+            'ราคา / ชิ้น (หยวน)': 'Unit_Price_Yuan',
+            'SHOPEE': 'Shopee', 'ราคาตลาด': 'Shopee',
+            'LAZADA': 'Lazada',
+            'TIKTOK': 'Tiktok',
+            'หมายเหตุ': 'Note',
+            'Link_Shop': 'Link',
+            'WeChat': 'WeChat'
+        }
+        df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
+        
+        # Ensure Critical Columns Exist
+        if 'Product_ID' not in df.columns: 
+             # ถ้ายังไม่มีแสดงว่าชื่อใน Sheet ไม่ตรงกับที่ map ไว้เลย ให้สร้าง column ว่างเพื่อกัน error
+             df['Product_ID'] = "" 
+        
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
@@ -153,14 +180,11 @@ def get_sale_from_folder():
         return pd.DataFrame()
 
 def save_po_batch_to_sheet(rows_data):
-    # ฟังก์ชันสำหรับบันทึกทีละหลายแถว (Batch Save)
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
-        
-        # Append rows
         ws.append_rows(rows_data)
         st.cache_data.clear() 
         return True
@@ -217,16 +241,22 @@ def update_master_limits(df_edited):
 st.title("📊 JST Hybrid Management System")
 
 if "selected_product_history" not in st.session_state: st.session_state.selected_product_history = None
-if 'po_temp_cart' not in st.session_state: st.session_state.po_temp_cart = [] # ตระกร้าสำหรับ PO
+if 'po_temp_cart' not in st.session_state: st.session_state.po_temp_cart = [] 
 
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
     df_sale = get_sale_from_folder()
     
-    if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
-    if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
-    if not df_sale.empty: df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
+    # Safe convert to string only if column exists
+    if not df_master.empty and 'Product_ID' in df_master.columns: 
+        df_master['Product_ID'] = df_master['Product_ID'].astype(str)
+        
+    if not df_po.empty and 'Product_ID' in df_po.columns: 
+        df_po['Product_ID'] = df_po['Product_ID'].astype(str)
+        
+    if not df_sale.empty and 'Product_ID' in df_sale.columns: 
+        df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
 
 # Calculate Sales for Stock
 recent_sales_map = {}
@@ -254,10 +284,11 @@ def show_history_dialog(fixed_product_id=None):
         st.divider()
         st.markdown(f"### ประวัติ: {selected_pid}")
         if not df_po.empty and 'Product_ID' in df_po.columns:
-            # กรองและแสดง 22 คอลัมน์ (หรือเฉพาะที่สำคัญ)
             hist = df_po[df_po['Product_ID'] == selected_pid].copy()
             if not hist.empty:
-                st.dataframe(hist, use_container_width=True, hide_index=True)
+                # เลือกโชว์เฉพาะคอลัมน์สำคัญ
+                cols_show = [c for c in ["PO_Number", "Order_Date", "Received_Date", "Qty", "Total_THB", "Transport", "Note"] if c in hist.columns]
+                st.dataframe(hist[cols_show], use_container_width=True, hide_index=True)
             else:
                 st.info("ไม่พบประวัติการสั่งซื้อ")
         else:
@@ -281,7 +312,6 @@ def po_batch_dialog():
     with st.container(border=True):
         st.subheader("2. เพิ่มสินค้า")
         
-        # Product Selector
         prod_list = []
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
@@ -290,8 +320,8 @@ def po_batch_dialog():
         
         c_img, c_form = st.columns([1, 3])
         
-        # Image Display
         with c_img:
+            pid = ""
             if sel_prod:
                 pid = sel_prod.split(" : ")[0]
                 item_data = df_master[df_master['Product_ID'] == pid]
@@ -301,9 +331,7 @@ def po_batch_dialog():
                     else: st.warning("No Image")
             else:
                 st.info("เลือกสินค้าเพื่อดูรูป")
-                pid = ""
 
-        # Form Inputs
         with c_form:
             r1c1, r1c2, r1c3 = st.columns(3)
             qty = r1c1.number_input("จำนวนที่รับ (Qty)", min_value=1, value=100, help="ใส่ยอดที่ได้รับจริงรอบนี้")
@@ -325,28 +353,16 @@ def po_batch_dialog():
                 wechat = l2.text_input("WeChat ID")
                 note = st.text_area("หมายเหตุ")
 
-        # Add Button Logic
         if st.button("➕ เพิ่มลงรายการ", type="primary"):
             if not po_number or not sel_prod:
                 st.error("⚠️ กรุณากรอกเลข PO และเลือกสินค้า")
             else:
-                # --- Auto Calculations (ตามสูตรที่ขอ) ---
-                # 1. ระยะเวลา
                 wait_days = (received_date - order_date).days if received_date and order_date else 0
-                
-                # 2. ค่าส่ง = เรทขนส่ง * CBM
                 ship_cost = ship_rate * cbm
-                
-                # 3. ราคารวมบาท = หยวน * เรท
                 total_thb = total_yuan * ex_rate
-                
-                # 4. ราคา/ชิ้น (บาท) = ((หยวน*เรท) + ค่าส่ง) / จำนวน
                 unit_cost_thb = ((total_yuan * ex_rate) + ship_cost) / qty if qty > 0 else 0
-                
-                # 5. ราคา/ชิ้น (หยวน) = ราคาหยวน / จำนวน
                 unit_price_yuan = total_yuan / qty if qty > 0 else 0
 
-                # Append to Temp List
                 new_item = {
                     "Product_ID": pid,
                     "PO_Number": po_number,
@@ -379,8 +395,6 @@ def po_batch_dialog():
         st.divider()
         st.markdown(f"##### 🛒 รายการรอการบันทึก ({len(st.session_state.po_temp_cart)})")
         df_cart = pd.DataFrame(st.session_state.po_temp_cart)
-        
-        # Show simplified table
         st.dataframe(df_cart[["Product_ID", "Qty", "Total_Yuan", "Unit_Cost_THB"]], use_container_width=True, hide_index=True)
         
         col_s1, col_s2 = st.columns([1, 4])
@@ -390,32 +404,16 @@ def po_batch_dialog():
                 st.rerun()
         with col_s2:
             if st.button("💾 บันทึกทั้งหมดลง Google Sheets", type="primary"):
-                # Prepare data for Google Sheets (22 Columns Exact Order)
                 rows_to_add = []
                 for item in st.session_state.po_temp_cart:
                     row = [
-                        item["Product_ID"],         # 1. SKU
-                        item["PO_Number"],          # 2. PO Number
-                        item["Transport"],          # 3. Transport
-                        item["Order_Date"],         # 4. Order Date
-                        item["Received_Date"],      # 5. Recv Date
-                        item["Wait_Days"],          # 6. Wait Days
-                        item["Qty"],                # 7. Qty
-                        item["Unit_Cost_THB"],      # 8. Cost/Piece (THB)
-                        item["Total_Yuan"],         # 9. Total RMB
-                        item["Total_THB"],          # 10. Total THB
-                        item["Ex_Rate"],            # 11. Rate
-                        item["Ship_Rate"],          # 12. Ship Rate
-                        item["CBM"],                # 13. CBM
-                        item["Ship_Cost"],          # 14. Ship Cost
-                        item["Weight"],             # 15. Weight
-                        item["Unit_Price_Yuan"],    # 16. Cost/Piece (RMB)
-                        item["Shopee"],             # 17. Shopee
-                        item["Lazada"],             # 18. Lazada
-                        item["Tiktok"],             # 19. Tiktok
-                        item["Note"],               # 20. Note
-                        item["Link"],               # 21. Link
-                        item["WeChat"]              # 22. WeChat
+                        item["Product_ID"], item["PO_Number"], item["Transport"],
+                        item["Order_Date"], item["Received_Date"], item["Wait_Days"],
+                        item["Qty"], item["Unit_Cost_THB"], item["Total_Yuan"],
+                        item["Total_THB"], item["Ex_Rate"], item["Ship_Rate"],
+                        item["CBM"], item["Ship_Cost"], item["Weight"],
+                        item["Unit_Price_Yuan"], item["Shopee"], item["Lazada"],
+                        item["Tiktok"], item["Note"], item["Link"], item["WeChat"]
                     ]
                     rows_to_add.append(row)
                 
@@ -434,11 +432,10 @@ dialog_action = None
 dialog_data = None
 
 # ==========================================
-# TAB 1: Daily Sales Report (คงเดิมตามที่คุณขอ)
+# TAB 1: Daily Sales Report
 # ==========================================
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
-    # ... (ส่วนนี้คง Logic เดิม 100% ตามไฟล์ที่คุณส่งมา) ...
     
     if "history_pid" in st.query_params:
         hist_pid = st.query_params["history_pid"]
@@ -535,7 +532,7 @@ with tab1:
             st.warning("ไม่มีข้อมูลการขาย")
 
 # ==========================================
-# TAB 2: Purchase Orders (แก้ไขใหม่เป็น Pop-up Batch Entry)
+# TAB 2: Purchase Orders
 # ==========================================
 with tab2:
     col_head, col_action = st.columns([4, 2])
@@ -544,30 +541,21 @@ with tab2:
         if st.button("➕ เพิ่ม PO ใหม่ (POP-UP)", type="primary", key="btn_add_po_popup"): 
             dialog_action = "po_batch"
     
-    # ส่วนแสดงตาราง History (แสดง 22 คอลัมน์ที่เพิ่มไป)
     if not df_po.empty:
-        # Reorder columns if they exist to match requirement for display
-        desired_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Qty", "Total_THB", "Transport"]
-        # Map actual columns from Sheet (Header names from Sheet 1 Row 1)
-        # Assumes the sheet headers are correct or similar. 
-        # If headers in sheet are English (based on save function), we just show what we have.
+        # Show key columns
         st.dataframe(df_po, use_container_width=True, hide_index=True)
     else:
         st.info("ยังไม่มีข้อมูล PO ในระบบ")
 
 # ==========================================
-# TAB 3: Stock Report (คงเดิม)
+# TAB 3: Stock Report
 # ==========================================
 with tab3:
     st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
     
     if not df_master.empty and 'Product_ID' in df_master.columns:
         df_stock_report = df_master.copy()
-        
-        # Merge recent sold
         df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
-        
-        # Calculate Stock
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
         
         if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
@@ -580,7 +568,6 @@ with tab3:
             
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
-        # Filters
         c_filt, c_srch = st.columns([2, 2])
         with c_filt: 
             status_options = ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"]
@@ -601,7 +588,6 @@ with tab3:
                     update_master_limits(st.session_state.edited_stock_data)
                     st.rerun()
 
-        # Data Editor
         final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Recent_Sold", "Status", "Min_Limit"]
         edited_df = st.data_editor(
             edit_df[final_cols],
