@@ -18,7 +18,6 @@ st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="�
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
-    .metric-card { background-color: #1a1a1a; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
     
     /* --- CSS ตาราง --- */
     [data-testid="stDataFrame"] th { 
@@ -48,6 +47,7 @@ FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 @st.cache_resource
 def get_credentials():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # ตรวจสอบว่ารันบน Streamlit Cloud (st.secrets) หรือ Local (credentials.json)
     if "gcp_service_account" in st.secrets:
         creds_dict = json.loads(st.secrets["gcp_service_account"]) if isinstance(st.secrets["gcp_service_account"], str) else dict(st.secrets["gcp_service_account"])
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
@@ -140,25 +140,8 @@ def get_sale_from_folder():
     except Exception as e:
         return pd.DataFrame()
 
-def update_master_limits(df_edited):
-    # ฟังก์ชันบันทึกจุดเตือน (คงเดิม)
-    try:
-        creds = get_credentials()
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(MASTER_SHEET_ID)
-        ws = sh.worksheet(TAB_NAME_STOCK)
-        headers = ws.row_values(1)
-        col_idx = headers.index("Min_Limit") + 1 if "Min_Limit" in headers else len(headers) + 1
-        if "Min_Limit" not in headers: ws.update_cell(1, col_idx, "Min_Limit")
-        
-        # Logic update อย่างง่าย (แนะนำให้ปรับปรุงถ้าข้อมูลเยอะมาก)
-        # ในที่นี้ละไว้เพื่อความกระชับ
-        st.toast("✅ บันทึกจุดเตือนเรียบร้อย (จำลอง)", icon="💾")
-    except Exception as e:
-        st.error(f"Save Limit Error: {e}")
-
 # ==========================================
-# 4. ฟังก์ชันคำนวณ PO (ใหม่)
+# 4. ฟังก์ชันคำนวณ PO (Helper Functions)
 # ==========================================
 def calculate_po_metrics(order_date, received_date, qty, total_yuan, exchange_rate, shipping_rate, cbm):
     # 1. ระยะเวลา
@@ -175,11 +158,11 @@ def calculate_po_metrics(order_date, received_date, qty, total_yuan, exchange_ra
     return wait_days, shipping_cost, total_thb, price_unit_thb, price_unit_yuan
 
 # ==========================================
-# 5. Main App
+# 5. Main App Execution
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
-# Init Session State
+# Init Session State สำหรับตระกร้า PO
 if 'po_cart' not in st.session_state: st.session_state.po_cart = []
 
 with st.spinner('กำลังโหลดข้อมูล...'):
@@ -190,7 +173,7 @@ with st.spinner('กำลังโหลดข้อมูล...'):
     # Pre-process Data
     if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
     
-    # Calculate Sales
+    # Calculate Sales (สำหรับ Tab ยอดขายและ Stock)
     recent_sales_map = {}
     latest_date_str = "-"
     if not df_sale.empty and 'Date_Only' in df_sale.columns:
@@ -199,22 +182,17 @@ with st.spinner('กำลังโหลดข้อมูล...'):
         recent_sales_map = df_sale[df_sale['Date_Only'] == max_date].groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
 
 # ==========================================
-# 6. TABS CONFIGURATION
+# 6. TABS UI CONFIGURATION
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📅 สรุปยอดขายรายวัน", "📝 บันทึกข้อมูล PO (ใหม่)", "📈 รายงาน Stock"])
 
 # ==========================================
-# TAB 1: Daily Sales Report (Code เดิม)
+# TAB 1: Daily Sales Report
 # ==========================================
 with tab1:
     st.subheader("📅 สรุปยอดขายรายวัน")
-    # (โค้ดส่วนนี้คงเดิมเพื่อความกระชับ จะแสดงผลตาม Logic เดิมที่มี)
-    # ... [ใส่ Logic การกรองและแสดงผลยอดขายรายวันแบบเดิมที่นี่] ...
-    # เพื่อไม่ให้โค้ดยาวเกินไป ผมจะใส่ Placeholder ไว้ แต่คุณสามารถใช้โค้ด Tab 1 เดิมมาวางตรงนี้ได้เลย
-    # หากต้องการโค้ดเต็มส่วนนี้ แจ้งได้ครับ (แต่เบื้องต้นส่วนนี้ไม่ได้ถูกขอให้แก้)
-    st.info("💡 เลือกช่วงวันที่เพื่อดูรายงานยอดขาย (Logic เดิม)")
+    st.info("💡 เลือกช่วงวันที่เพื่อดูรายงานยอดขาย")
     
-    # Simple Display Implementation for Context
     col_d1, col_d2 = st.columns(2)
     with col_d1: d_start = st.date_input("เริ่ม", date.today().replace(day=1))
     with col_d2: d_end = st.date_input("สิ้นสุด", date.today())
@@ -222,15 +200,21 @@ with tab1:
     if not df_sale.empty:
         mask = (df_sale['Date_Only'] >= d_start) & (df_sale['Date_Only'] <= d_end)
         df_filt = df_sale[mask]
-        pivot = df_filt.groupby(['Product_ID', 'Date_Only'])['Qty_Sold'].sum().unstack(fill_value=0)
-        st.dataframe(pivot, use_container_width=True)
+        # Pivot Table: Rows=Product, Cols=Date
+        if not df_filt.empty:
+            pivot = df_filt.groupby(['Product_ID', 'Date_Only'])['Qty_Sold'].sum().unstack(fill_value=0)
+            st.dataframe(pivot, use_container_width=True)
+        else:
+            st.warning("ไม่พบข้อมูลในช่วงวันที่เลือก")
+    else:
+        st.warning("ยังไม่มีข้อมูลยอดขาย")
 
 # ==========================================
-# TAB 2: PO Entry (New Requirement 🚀)
+# TAB 2: PO Entry (Batch Mode)
 # ==========================================
 with tab2:
     st.markdown("### 📝 บันทึกการสั่งซื้อ (Batch PO Entry)")
-    st.info("💡 ระบบรองรับการเพิ่มสินค้าหลายรายการใน 1 PO และคำนวณต้นทุนให้อัตโนมัติ")
+    st.info("💡 เพิ่มสินค้าหลายรายการลงในตระกร้า แล้วกดบันทึกครั้งเดียว")
 
     # --- ส่วนที่ 1: Header ข้อมูลหลัก ---
     with st.container(border=True):
@@ -283,8 +267,10 @@ with tab2:
                 p_shopee = m1.number_input("Shopee Price", 0)
                 p_lazada = m2.number_input("Lazada Price", 0)
                 p_tiktok = m3.number_input("TikTok Price", 0)
-                link_shop = st.text_input("Link Shop")
-                wechat = st.text_input("WeChat ID")
+                
+                l1, l2 = st.columns(2)
+                link_shop = l1.text_input("Link Shop")
+                wechat = l2.text_input("WeChat ID")
                 note = st.text_area("หมายเหตุ", placeholder="เช่น สินค้าขาด, ชำรุด")
 
         # Add Button
@@ -338,6 +324,10 @@ with tab2:
         ]
         
         df_cart = pd.DataFrame(st.session_state.po_cart)
+        # Ensure columns exist even if empty to prevent error
+        for col in cols_order:
+            if col not in df_cart.columns: df_cart[col] = ""
+            
         df_display = df_cart[cols_order] # Reorder
         
         st.dataframe(
@@ -352,31 +342,33 @@ with tab2:
         )
 
         b_col1, b_col2 = st.columns([1, 4])
-        if b_col1.button("🗑️ ล้างทั้งหมด", type="secondary"):
-            st.session_state.po_cart = []
-            st.rerun()
-            
-        if b_col2.button("💾 บันทึกข้อมูลลง Google Sheets", type="primary"):
-            try:
-                creds = get_credentials()
-                gc = gspread.authorize(creds)
-                sh = gc.open_by_key(MASTER_SHEET_ID)
-                ws = sh.worksheet(TAB_NAME_PO)
-                
-                # Append Rows
-                data_values = df_display.values.tolist()
-                ws.append_rows(data_values)
-                
-                st.success("✅ บันทึกข้อมูลสำเร็จ!")
+        with b_col1:
+            if st.button("🗑️ ล้างทั้งหมด", type="secondary"):
                 st.session_state.po_cart = []
-                st.cache_data.clear()
-                time.sleep(2)
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error saving data: {e}")
+            
+        with b_col2:
+            if st.button("💾 บันทึกข้อมูลลง Google Sheets", type="primary"):
+                try:
+                    creds = get_credentials()
+                    gc = gspread.authorize(creds)
+                    sh = gc.open_by_key(MASTER_SHEET_ID)
+                    ws = sh.worksheet(TAB_NAME_PO)
+                    
+                    # Append Rows
+                    data_values = df_display.values.tolist()
+                    ws.append_rows(data_values)
+                    
+                    st.success("✅ บันทึกข้อมูลสำเร็จ!")
+                    st.session_state.po_cart = []
+                    st.cache_data.clear()
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving data: {e}")
 
 # ==========================================
-# TAB 3: Stock Report (Code เดิม)
+# TAB 3: Stock Report
 # ==========================================
 with tab3:
     st.subheader("📈 รายงาน Stock")
@@ -406,224 +398,3 @@ with tab3:
         )
     else:
         st.warning("No Master Data found.")
-
-# ... (ส่วน Import และ Setup ด้านบนคงเดิม) ...
-
-# ==========================================
-# ฟังก์ชันคำนวณวันและราคา (Helper Functions)
-# ==========================================
-def calculate_po_metrics(order_date, received_date, qty, total_yuan, exchange_rate, shipping_rate, cbm):
-    # 1. คำนวณระยะเวลา (Wait Date)
-    if received_date and order_date:
-        wait_days = (received_date - order_date).days
-    else:
-        wait_days = 0
-
-    # 2. คำนวณค่าส่ง (Shipping Cost) = เรทค่าขนส่ง * คิว
-    shipping_cost = shipping_rate * cbm
-
-    # 3. คำนวณราคารวมบาท (Total THB) = ราคาหยวนรวม * เรทเงิน
-    total_thb = total_yuan * exchange_rate
-
-    # 4. คำนวณราคาต่อชิ้น (บาท) = ((ราคาหยวนรวม * เรทเงิน) + ค่าส่ง) / จำนวน
-    if qty > 0:
-        price_unit_thb = (total_thb + shipping_cost) / qty
-        price_unit_yuan = total_yuan / qty
-    else:
-        price_unit_thb = 0
-        price_unit_yuan = 0
-
-    return wait_days, shipping_cost, total_thb, price_unit_thb, price_unit_yuan
-
-# ==========================================
-# ส่วนหน้าจอ: บันทึกข้อมูล PO (แก้ไขใหม่)
-# ==========================================
-elif menu == "📝 บันทึกข้อมูล PO":
-    st.title("📝 บันทึกข้อมูลการสั่งซื้อ (PO Entry)")
-    st.info("💡 ระบบรองรับการเพิ่มสินค้าหลายรายการใน 1 PO และคำนวณต้นทุนให้อัตโนมัติ")
-
-    # โหลดข้อมูล Master Product เพื่อเอารูปภาพและรหัสสินค้า
-    # สมมติว่า df_stock_report ถูกโหลดมาแล้วจากฟังก์ชัน load_data() ในส่วนหลักของแอพ
-    # ถ้ายังไม่มีบรรทัดนี้ใน scope นี้ ให้เรียกใช้: df_stock_report = load_data() 
-    
-    if 'po_cart' not in st.session_state:
-        st.session_state.po_cart = []
-
-    # --- ส่วนที่ 1: ข้อมูลหลักของ PO (Header) ---
-    with st.container(border=True):
-        st.subheader("1. ข้อมูลหลัก (Header)")
-        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
-        
-        with col_h1:
-            po_number = st.text_input("เลข PO (PO Number)", placeholder="เช่น PO-2401001")
-        with col_h2:
-            transport_type = st.selectbox("ขนส่ง (Transport)", ["ทางรถ", "ทางเรือ", "ทางอากาศ"])
-        with col_h3:
-            order_date = st.date_input("วันที่สั่งซื้อ (Order Date)", datetime.today())
-        with col_h4:
-            received_date = st.date_input("วันที่ได้รับ (Received Date)", datetime.today())
-            
-        # คำนวณระยะเวลาเบื้องต้นเพื่อโชว์
-        wait_days_preview = (received_date - order_date).days
-        st.caption(f"📅 ระยะเวลาดำเนินการ: **{wait_days_preview} วัน**")
-
-    # --- ส่วนที่ 2: เพิ่มรายการสินค้า (Item Entry) ---
-    with st.container(border=True):
-        st.subheader("2. รายละเอียดสินค้า (Item Detail)")
-        
-        # ค้นหาสินค้า
-        product_list = df_stock_report['Product_ID'].unique().tolist() if not df_stock_report.empty else []
-        selected_sku = st.selectbox("เลือกสินค้า (SKU)", product_list)
-
-        # แสดงรูปภาพสินค้า (Requirement ข้อ 1)
-        col_img, col_input = st.columns([1, 3])
-        
-        with col_img:
-            if selected_sku:
-                # ดึงข้อมูลสินค้าจาก Master
-                item_data = df_stock_report[df_stock_report['Product_ID'] == selected_sku]
-                if not item_data.empty:
-                    # สมมติคอลัมน์รูปชื่อ 'Image' ถ้าชื่ออื่นให้แก้ตรงนี้
-                    img_url = item_data.iloc[0].get('Image', '') 
-                    if img_url:
-                        st.image(img_url, caption=f"รูป: {selected_sku}", width=200)
-                    else:
-                        st.warning("ไม่มีรูปภาพ")
-                else:
-                    st.error("ไม่พบข้อมูลสินค้า")
-
-        with col_input:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                qty_ordered = st.number_input("จำนวนที่รับ (Qty)", min_value=1, value=100, help="กรอกจำนวนที่ได้รับจริงในรอบนี้ (กรณีแบ่งรับ)")
-                exchange_rate = st.number_input("เรทเงิน (Exchange Rate)", min_value=0.0, value=5.0, format="%.4f")
-            with c2:
-                total_yuan = st.number_input("ราคารวม (หยวน)", min_value=0.0, value=0.0, step=10.0, help="ราคาต้นทุนรวมทั้งหมดหน่วยหยวน")
-                shipping_rate = st.number_input("เรทขนส่ง (Shipping Rate)", min_value=0.0, value=0.0, step=100.0)
-            with c3:
-                cbm = st.number_input("ขนาด คิว (CBM)", min_value=0.0, value=0.0, format="%.4f")
-                weight_kg = st.number_input("น้ำหนัก (KG)", min_value=0.0, value=0.0)
-
-            # ข้อมูลเพิ่มเติม (Market Price & Links)
-            with st.expander("ข้อมูลเพิ่มเติม (ราคาคู่แข่ง & ลิงก์)", expanded=False):
-                r1, r2, r3 = st.columns(3)
-                shopee_p = r1.number_input("ราคา Shopee", min_value=0)
-                lazada_p = r2.number_input("ราคา Lazada", min_value=0)
-                tiktok_p = r3.number_input("ราคา TikTok", min_value=0)
-                
-                l1, l2 = st.columns(2)
-                link_shop = l1.text_input("Link ร้านค้า")
-                wechat_id = l2.text_input("WeChat ID")
-                note = st.text_area("หมายเหตุ", placeholder="เช่น สินค้าชำรุด, มาไม่ครบ")
-
-        # ปุ่มคำนวณและเพิ่มลงตระกร้า
-        add_btn = st.button("➕ เพิ่มรายการลงตาราง (Add to List)", type="primary")
-
-        if add_btn:
-            if not po_number:
-                st.error("กรุณากรอกเลข PO ก่อน")
-            else:
-                # ทำการคำนวณ Auto (Requirement ข้อ 4)
-                w_days, ship_cost, tot_thb, unit_thb, unit_yuan = calculate_po_metrics(
-                    order_date, received_date, qty_ordered, total_yuan, exchange_rate, shipping_rate, cbm
-                )
-
-                # สร้าง Dictionary ข้อมูลตามลำดับคอลัมน์ใหม่ (Requirement ข้อ 6)
-                new_item = {
-                    "รหัสสินค้า": selected_sku,
-                    "เลข PO": po_number,
-                    "ขนส่ง": transport_type,
-                    "วันที่สั่งซื้อ": str(order_date),
-                    "วันที่ได้รับ": str(received_date),
-                    "ระยะเวลา": w_days,                 # Auto
-                    "จำนวน": qty_ordered,
-                    "ราคา/ชิ้น": round(unit_thb, 2),    # Auto (บาทรวมส่ง)
-                    "ราคา (หยวน)": total_yuan,
-                    "ราคา (บาท)": round(tot_thb, 2),    # Auto
-                    "เรทเงิน": exchange_rate,
-                    "เรทค่าขนส่ง": shipping_rate,
-                    "ขนาด (คิว)": cbm,
-                    "ค่าส่ง": round(ship_cost, 2),      # Auto
-                    "น้ำหนัก / KG": weight_kg,
-                    "ราคา / ชิ้น (หยวน)": round(unit_yuan, 4), # Auto
-                    "SHOPEE": shopee_p,
-                    "LAZADA": lazada_p,
-                    "TIKTOK": tiktok_p,
-                    "หมายเหตุ": note,
-                    "Link_Shop": link_shop,
-                    "WeChat": wechat_id
-                }
-                
-                st.session_state.po_cart.append(new_item)
-                st.success(f"เพิ่ม {selected_sku} ลงรายการแล้ว!")
-
-    # --- ส่วนที่ 3: ตารางสรุปรายการที่จะบันทึก (Preview) ---
-    if len(st.session_state.po_cart) > 0:
-        st.divider()
-        st.subheader(f"🛒 รายการรอการบันทึก ({len(st.session_state.po_cart)} รายการ)")
-        
-        # แสดงผลเป็น DataFrame
-        df_cart = pd.DataFrame(st.session_state.po_cart)
-        
-        # จัดลำดับคอลัมน์ให้ตรงเป๊ะตาม Requirement ข้อ 5 และ 6
-        cols_order = [
-            "รหัสสินค้า", "เลข PO", "ขนส่ง", "วันที่สั่งซื้อ", "วันที่ได้รับ", "ระยะเวลา", 
-            "จำนวน", "ราคา/ชิ้น", "ราคา (หยวน)", "ราคา (บาท)", "เรทเงิน", "เรทค่าขนส่ง", 
-            "ขนาด (คิว)", "ค่าส่ง", "น้ำหนัก / KG", "ราคา / ชิ้น (หยวน)", 
-            "SHOPEE", "LAZADA", "TIKTOK", "หมายเหตุ", "Link_Shop", "WeChat"
-        ]
-        
-        # Reorder columns (ป้องกัน error ถ้า key ไม่ครบ)
-        df_display = df_cart[cols_order]
-
-        st.dataframe(
-            df_display, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "ราคา (หยวน)": st.column_config.NumberColumn(format="%.2f ¥"),
-                "ราคา (บาท)": st.column_config.NumberColumn(format="%.2f ฿"),
-                "ราคา/ชิ้น": st.column_config.NumberColumn(format="%.2f ฿", help="ต้นทุนต่อชิ้นรวมส่ง"),
-                "ค่าส่ง": st.column_config.NumberColumn(format="%.2f ฿"),
-            }
-        )
-
-        col_act1, col_act2 = st.columns([1, 4])
-        with col_act1:
-            if st.button("🗑️ ล้างรายการทั้งหมด", type="secondary"):
-                st.session_state.po_cart = []
-                st.rerun()
-        
-        with col_act2:
-            if st.button("💾 บันทึกข้อมูลลง Google Sheets", type="primary"):
-                try:
-                    # เชื่อมต่อ Google Sheets (ใช้ตัวแปรเดิมในโค้ดคุณ เช่น sheet_po)
-                    # สมมติว่า sheet_po คือ Worksheet 'PO_DATA'
-                    # ** ข้อควรระวัง: ต้องเปลี่ยนชื่อคอลัมน์ใน Google Sheet ให้ตรงกับ cols_order ก่อนใช้งาน **
-                    
-                    # แปลงข้อมูลเป็น List of Lists เพื่อเตรียมเขียน
-                    data_to_append = df_display.values.tolist()
-                    
-                    # Append ข้อมูล
-                    sheet_po.append_rows(data_to_append) 
-                    
-                    st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว!")
-                    st.session_state.po_cart = [] # เคลียร์ค่า
-                    time.sleep(2)
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
-
-    # --- ส่วนที่ 4: ประวัติการบันทึก (History) ---
-    st.divider()
-    st.subheader("📜 ประวัติการบันทึก PO ล่าสุด")
-    try:
-        data_po = sheet_po.get_all_records()
-        if data_po:
-            df_po_history = pd.DataFrame(data_po)
-            # เรียงลำดับคอลัมน์ (ถ้า Sheet มีคอลัมน์ครบ)
-            # ถ้าชื่อคอลัมน์ใน Sheet ตรงกับ cols_order จะแสดงผลได้ถูกต้อง
-            st.dataframe(df_po_history.tail(10), use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.warning(f"ยังไม่มีข้อมูล หรืออ่านข้อมูลไม่ได้ ({e})")
