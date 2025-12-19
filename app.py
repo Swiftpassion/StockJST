@@ -113,7 +113,7 @@ def get_po_data():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- เพิ่มการ Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ เพื่อให้ Code เดิมทำงานได้ ---
+        # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
             'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 'จำนวน': 'Qty_Ordered',
@@ -122,17 +122,14 @@ def get_po_data():
             'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
             'ราคา (บาท)': 'Total_THB', 'Link_Shop': 'Link', 'WeChat': 'WeChat'
         }
-        # Rename เฉพาะตัวที่เจอ
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
 
         if not df.empty:
             df['Sheet_Row_Index'] = range(2, len(df) + 2)
-            # แปลงค่าตัวเลขพื้นฐาน
             for col in ['Qty_Ordered', 'Qty_Remaining', 'Total_Yuan', 'Yuan_Rate']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # ถ้าไม่มี Qty_Remaining ให้ใช้ Qty_Ordered (กรณีข้อมูลใหม่)
             if 'Qty_Remaining' not in df.columns and 'Qty_Ordered' in df.columns:
                  df['Qty_Remaining'] = df['Qty_Ordered']
                  
@@ -193,9 +190,6 @@ def save_po_to_sheet(data_row, row_index=None):
             else: formatted_row.append(item)
                 
         if row_index:
-            # Update เฉพาะแถวเดิม (รองรับแค่โครงสร้างเดิม)
-            # หมายเหตุ: การ Edit แบบเดิมอาจจะไม่รองรับคอลัมน์ใหม่ 22 ช่อง ถ้าไม่ได้ปรับปรุง
-            # แต่ในที่นี้คง Code เดิมไว้ตามคำขอ
             range_name = f"A{row_index}:Q{row_index}" 
             ws.update(range_name, [formatted_row])
         else:
@@ -328,13 +322,11 @@ def po_form_dialog(mode="search"):
             if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
     
     if d:
-        # (Form เดิมของคุณ - ตัดทอนเพื่อให้สั้นลงแต่ทำงานได้)
         c1, c2 = st.columns(2)
         new_qty = c1.number_input("จำนวนสั่ง", value=int(d.get("Qty_Ordered", 0)))
         new_note = c2.text_input("หมายเหตุ", value=str(d.get("Note", "")))
         
         if st.button("💾 บันทึกทับ"):
-            # Logic การบันทึกแบบเดิม
             st.warning("ฟังก์ชันแก้ไขแบบเดิม (Demo: ยังไม่เชื่อมต่อ Save ใหม่ เนื่องจากโครงสร้างเปลี่ยน)")
 
 # --- [NEW] Batch Entry Dialog (สำหรับปุ่ม "เพิ่ม PO") ---
@@ -374,15 +366,21 @@ def po_batch_dialog():
             r1c1, r1c2, r1c3 = st.columns(3)
             qty = r1c1.number_input("จำนวน (Qty)", min_value=1, value=100)
             ex_rate = r1c2.number_input("เรทเงิน", value=5.0)
-            cbm = r1c3.number_input("CBM", value=0.0)
+            cbm = r1c3.number_input("CBM", value=0.0, format="%.4f")
             
             r2c1, r2c2, r2c3 = st.columns(3)
             total_yuan = r2c1.number_input("รวมหยวน", value=0.0)
             ship_rate = r2c2.number_input("เรทขนส่ง", value=5000.0)
             weight = r2c3.number_input("นน. (KG)", value=0.0)
             
-            with st.expander("เพิ่มเติม"):
-                shop_link = st.text_input("Link")
+            with st.expander("เพิ่มเติม (ราคาตลาด/Link)"):
+                m1, m2, m3 = st.columns(3)
+                p_shopee = m1.number_input("Shopee", 0)
+                p_lazada = m2.number_input("Lazada", 0)
+                p_tiktok = m3.number_input("TikTok", 0)
+                l1, l2 = st.columns(2)
+                shop_link = l1.text_input("Link")
+                wechat_id = l2.text_input("WeChat")
                 note = st.text_area("Note")
 
         if st.button("➕ เพิ่มลงตระกร้า"):
@@ -391,7 +389,7 @@ def po_batch_dialog():
                 wait_days = (received_date - order_date).days if received_date and order_date else 0
                 ship_cost = ship_rate * cbm
                 total_thb = total_yuan * ex_rate
-                unit_thb = (total_thb + ship_cost) / qty if qty > 0 else 0
+                unit_thb = ((total_yuan * ex_rate) + ship_cost) / qty if qty > 0 else 0
                 unit_yuan = total_yuan / qty if qty > 0 else 0
                 
                 item = {
@@ -400,33 +398,38 @@ def po_batch_dialog():
                     "Qty": qty, "UnitTHB": round(unit_thb,2), "TotYuan": total_yuan,
                     "TotTHB": round(total_thb,2), "Rate": ex_rate, "ShipRate": ship_rate,
                     "CBM": cbm, "ShipCost": round(ship_cost,2), "W": weight,
-                    "UnitYuan": round(unit_yuan,4), "Note": note, "Link": shop_link
+                    "UnitYuan": round(unit_yuan,4), "Shopee": p_shopee, "Laz": p_lazada,
+                    "Tik": p_tiktok, "Note": note, "Link": shop_link, "WeChat": wechat_id
                 }
                 st.session_state.po_temp_cart.append(item)
                 st.success(f"เพิ่ม {pid} แล้ว")
 
-    # 3. Save
+    # 3. Preview & Save
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(pd.DataFrame(st.session_state.po_temp_cart))
-        if st.button("💾 บันทึกทั้งหมด"):
-            rows = []
-            for i in st.session_state.po_temp_cart:
-                # Map to 22 Columns
-                # 1.SKU 2.PO 3.Trans 4.Ord 5.Recv 6.Wait 7.Qty 8.UnitTHB 9.TotYuan 10.TotTHB
-                # 11.Rate 12.ShipRate 13.CBM 14.ShipCost 15.W 16.UnitYuan 17.Shopee 18.Laz 19.Tik 20.Note 21.Link 22.WeChat
-                row = [
-                    i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"],
-                    i["Qty"], i["UnitTHB"], i["TotYuan"], i["TotTHB"],
-                    i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"],
-                    i["UnitYuan"], 0, 0, 0, i["Note"], i["Link"], ""
-                ]
-                rows.append(row)
-            
-            if save_po_batch_to_sheet(rows):
-                st.success("บันทึกสำเร็จ!")
+        c_clear, c_save = st.columns([1, 4])
+        with c_clear:
+            if st.button("ล้าง"):
                 st.session_state.po_temp_cart = []
                 st.rerun()
+        with c_save:
+            if st.button("💾 บันทึกทั้งหมด"):
+                rows = []
+                for i in st.session_state.po_temp_cart:
+                    # Map to 22 Columns
+                    row = [
+                        i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"],
+                        i["Qty"], i["UnitTHB"], i["TotYuan"], i["TotTHB"],
+                        i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"],
+                        i["UnitYuan"], i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"]
+                    ]
+                    rows.append(row)
+                
+                if save_po_batch_to_sheet(rows):
+                    st.success("บันทึกสำเร็จ!")
+                    st.session_state.po_temp_cart = []
+                    st.rerun()
 
 # ==========================================
 # 6. TABS & UI LOGIC
@@ -736,7 +739,7 @@ with tab3:
 # ==========================================
 # 🛑 EXECUTE DIALOGS
 # ==========================================
-if dialog_action == "po_add":
+if dialog_action == "po_batch":
     po_batch_dialog() # ใช้แบบใหม่ (Batch)
 elif dialog_action == "po_search":
     po_form_dialog(mode="search") # ใช้แบบเดิม (Edit)
