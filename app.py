@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import json
 import time
+import calendar
 from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -17,6 +18,7 @@ st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="�
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
+    .metric-card { background-color: #1a1a1a; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
     
     /* --- CSS ตาราง --- */
     [data-testid="stDataFrame"] th { 
@@ -24,10 +26,14 @@ st.markdown("""
         background-color: #1e3c72 !important; 
         color: white !important; 
         vertical-align: middle !important; 
-        min-height: 50px; 
+        min-height: 60px; 
         font-size: 14px; 
         border-bottom: 2px solid #ffffff !important; 
     }
+    
+    [data-testid="stDataFrame"] th:first-child { border-top-left-radius: 8px; }
+    [data-testid="stDataFrame"] th:last-child { border-top-right-radius: 8px; }
+    [data-testid="stDataFrame"] td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
     
     .stButton button { width: 100%; }
     button[data-testid="stNumberInputStepDown"], button[data-testid="stNumberInputStepUp"] { display: none !important; }
@@ -46,7 +52,6 @@ FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 @st.cache_resource
 def get_credentials():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    # ตรวจสอบว่ารันบน Streamlit Cloud หรือ Local
     if "gcp_service_account" in st.secrets:
         creds_dict = json.loads(st.secrets["gcp_service_account"]) if isinstance(st.secrets["gcp_service_account"], str) else dict(st.secrets["gcp_service_account"])
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
@@ -56,6 +61,13 @@ def get_credentials():
 # ==========================================
 # 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
 # ==========================================
+
+def highlight_negative(val):
+    if isinstance(val, (int, float)):
+        if val < 0:
+            return 'color: #ff4b4b; font-weight: bold;'
+    return ''
+
 @st.cache_data(ttl=300)
 def get_stock_from_sheet():
     try:
@@ -74,14 +86,15 @@ def get_stock_from_sheet():
             'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
             'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock', 'คงเหลือ': 'Initial_Stock',
             'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit',
-            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type'
+            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
-        # Ensure minimal columns exist
-        for col in ['Product_ID', 'Product_Name', 'Initial_Stock', 'Product_Type', 'Min_Limit', 'Image']:
-            if col not in df.columns: df[col] = ""
-
+        if 'Initial_Stock' not in df.columns: df['Initial_Stock'] = 0
+        if 'Product_ID' not in df.columns: df['Product_ID'] = "Unknown"
+        if 'Product_Name' not in df.columns: df['Product_Name'] = df['Product_ID']
+        if 'Product_Type' not in df.columns: df['Product_Type'] = "ทั่วไป"
+        
         df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
         return df
     except Exception as e:
@@ -96,7 +109,8 @@ def get_po_data():
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         data = ws.get_all_records()
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
         return pd.DataFrame()
@@ -106,7 +120,7 @@ def get_sale_from_folder():
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
-        results = service.files().list(q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false", orderBy='modifiedTime desc', pageSize=50).execute()
+        results = service.files().list(q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false", orderBy='modifiedTime desc', pageSize=100, fields="files(id, name)").execute()
         items = results.get('files', [])
         if not items: return pd.DataFrame()
         
@@ -121,8 +135,7 @@ def get_sale_from_folder():
                 while done is False: status, done = downloader.next_chunk()
                 fh.seek(0)
                 temp_df = pd.read_excel(fh)
-                
-                col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'เวลาสั่งซื้อ':'Order_Time'}
+                col_map = {'รหัสสินค้า':'Product_ID', 'จำนวน':'Qty_Sold', 'ร้านค้า':'Shop', 'เวลาสั่งซื้อ':'Order_Time'}
                 temp_df = temp_df.rename(columns={k:v for k,v in col_map.items() if k in temp_df.columns})
                 
                 if 'Qty_Sold' in temp_df.columns: 
@@ -136,287 +149,476 @@ def get_sale_from_folder():
 
         return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     except Exception as e:
+        st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
 
-# ==========================================
-# 4. ฟังก์ชันคำนวณ PO (NEW Helper Function)
-# ==========================================
-def calculate_po_metrics(order_date, received_date, qty, total_yuan, exchange_rate, shipping_rate, cbm):
-    # 1. ระยะเวลา
-    wait_days = (received_date - order_date).days if received_date and order_date else 0
-    # 2. ค่าส่ง
-    shipping_cost = shipping_rate * cbm
-    # 3. ราคารวมบาท
-    total_thb = total_yuan * exchange_rate
-    # 4. ราคาต่อชิ้น (บาท) = ((หยวน*เรท)+ค่าส่ง)/จำนวน
-    price_unit_thb = ((total_thb + shipping_cost) / qty) if qty > 0 else 0
-    # 5. ราคาต่อชิ้น (หยวน)
-    price_unit_yuan = (total_yuan / qty) if qty > 0 else 0
-    
-    return wait_days, shipping_cost, total_thb, price_unit_thb, price_unit_yuan
+def save_po_batch_to_sheet(rows_data):
+    # ฟังก์ชันสำหรับบันทึกทีละหลายแถว (Batch Save)
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_PO)
+        
+        # Append rows
+        ws.append_rows(rows_data)
+        st.cache_data.clear() 
+        return True
+    except Exception as e:
+        st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
+        return False
+
+def update_master_limits(df_edited):
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_STOCK)
+        headers = ws.row_values(1)
+        target_col_name = "Min_Limit"
+        if target_col_name not in headers:
+            ws.update_cell(1, len(headers) + 1, target_col_name)
+            col_index = len(headers) + 1
+        else:
+            col_index = headers.index(target_col_name) + 1
+        
+        all_rows = ws.get_all_values()
+        if len(all_rows) < 2: return
+        header_row = all_rows[0]
+        pid_idx = -1
+        for i, h in enumerate(header_row):
+            if h in ['รหัสสินค้า', 'รหัส', 'ID', 'Product_ID']:
+                pid_idx = i
+                break
+        if pid_idx == -1: return
+
+        limit_map = df_edited.set_index('Product_ID')['Min_Limit'].to_dict()
+        values_to_update = []
+        for row in all_rows[1:]:
+            pid = str(row[pid_idx]) if len(row) > pid_idx else ""
+            old_val = 10
+            if len(row) >= col_index:
+                try: old_val = int(row[col_index-1])
+                except: old_val = 10
+            
+            if pid in limit_map: values_to_update.append([int(limit_map[pid])])
+            else: values_to_update.append([old_val])
+
+        range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
+        ws.update(range_name, values_to_update)
+        st.toast("✅ บันทึกจุดเตือนเรียบร้อยแล้ว!", icon="💾")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"❌ บันทึกจุดเตือนไม่สำเร็จ: {e}")
 
 # ==========================================
-# 5. Main App Execution
+# 4. Main App & Data Loading
 # ==========================================
 st.title("📊 JST Hybrid Management System")
 
-# Init Session State สำหรับตระกร้า PO
-if 'po_cart' not in st.session_state: st.session_state.po_cart = []
+if "selected_product_history" not in st.session_state: st.session_state.selected_product_history = None
+if 'po_temp_cart' not in st.session_state: st.session_state.po_temp_cart = [] # ตระกร้าสำหรับ PO
 
 with st.spinner('กำลังโหลดข้อมูล...'):
     df_master = get_stock_from_sheet()
     df_po = get_po_data()
     df_sale = get_sale_from_folder()
-
-    # Pre-process Data
-    if not df_master.empty: 
-        df_master['Product_ID'] = df_master['Product_ID'].astype(str)
-        # เติมค่าว่างใน Image ป้องกัน Error
-        if 'Image' not in df_master.columns: df_master['Image'] = ""
     
-    # Calculate Sales (Logic เดิมสำหรับ Dashboard)
-    recent_sales_map = {}
-    latest_date_str = "-"
-    if not df_sale.empty and 'Date_Only' in df_sale.columns:
-        max_date = df_sale['Date_Only'].max()
-        latest_date_str = max_date.strftime("%d/%m/%Y")
-        recent_sales_map = df_sale[df_sale['Date_Only'] == max_date].groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
+    if not df_master.empty: df_master['Product_ID'] = df_master['Product_ID'].astype(str)
+    if not df_po.empty: df_po['Product_ID'] = df_po['Product_ID'].astype(str)
+    if not df_sale.empty: df_sale['Product_ID'] = df_sale['Product_ID'].astype(str)
+
+# Calculate Sales for Stock
+recent_sales_map = {}
+latest_date_str = "-"
+if not df_sale.empty and 'Date_Only' in df_sale.columns:
+    max_date = df_sale['Date_Only'].max()
+    latest_date_str = max_date.strftime("%d/%m/%Y")
+    recent_sales_map = df_sale[df_sale['Date_Only'] == max_date].groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
 
 # ==========================================
-# 6. SIDEBAR MENU & NAVIGATION
+# 5. DIALOG FUNCTIONS
 # ==========================================
-with st.sidebar:
-    st.header("เมนูหลัก")
-    # ใช้ selectbox แทน option_menu ภายนอกเพื่อให้ code ทำงานได้โดยไม่ต้องลง lib เพิ่ม
-    menu = st.selectbox(
-        "เลือกรายการ",
-        ["📊 สรุปยอดขายรายวัน", "📝 บันทึกข้อมูล PO", "📈 รายงาน Stock"]
-    )
-    st.divider()
-    st.caption(f"Last Update: {datetime.now().strftime('%H:%M')}")
 
-# ==========================================
-# ส่วนที่ 1: Dashboard (Logic เดิม)
-# ==========================================
-if menu == "📊 สรุปยอดขายรายวัน":
-    st.subheader("📅 สรุปยอดขายรายวัน")
-    st.info("💡 เลือกช่วงวันที่เพื่อดูรายงานยอดขาย")
+# --- Dialog: History ---
+@st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
+def show_history_dialog(fixed_product_id=None):
+    selected_pid = fixed_product_id
+    if not selected_pid:
+        if df_master.empty: st.warning("ไม่มีข้อมูล Master"); return
+        product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+        selected_product = st.selectbox("🔍 ค้นหาสินค้า", options=product_options, index=None, placeholder="พิมพ์เพื่อค้นหา...")
+        if selected_product: selected_pid = selected_product.split(" : ")[0]
     
-    col_d1, col_d2 = st.columns(2)
-    with col_d1: d_start = st.date_input("เริ่ม", date.today().replace(day=1))
-    with col_d2: d_end = st.date_input("สิ้นสุด", date.today())
-    
-    if not df_sale.empty:
-        mask = (df_sale['Date_Only'] >= d_start) & (df_sale['Date_Only'] <= d_end)
-        df_filt = df_sale[mask]
-        
-        if not df_filt.empty:
-            # Pivot Table: Rows=Product, Cols=Date
-            pivot = df_filt.groupby(['Product_ID', 'Date_Only'])['Qty_Sold'].sum().unstack(fill_value=0)
-            
-            # Formatting Date columns
-            pivot.columns = [d.strftime('%d/%m') for d in pivot.columns]
-            
-            st.dataframe(pivot, use_container_width=True)
-            
-            # Summary Metrics
-            st.divider()
-            total_sold = df_filt['Qty_Sold'].sum()
-            st.metric("รวมยอดขายทั้งหมด (ชิ้น)", f"{total_sold:,}")
+    if selected_pid:
+        st.divider()
+        st.markdown(f"### ประวัติ: {selected_pid}")
+        if not df_po.empty and 'Product_ID' in df_po.columns:
+            # กรองและแสดง 22 คอลัมน์ (หรือเฉพาะที่สำคัญ)
+            hist = df_po[df_po['Product_ID'] == selected_pid].copy()
+            if not hist.empty:
+                st.dataframe(hist, use_container_width=True, hide_index=True)
+            else:
+                st.info("ไม่พบประวัติการสั่งซื้อ")
         else:
-            st.warning("ไม่พบข้อมูลในช่วงวันที่เลือก")
-    else:
-        st.warning("ยังไม่มีข้อมูลยอดขายในระบบ")
+            st.info("ยังไม่มีข้อมูล PO")
 
-# ==========================================
-# ส่วนที่ 2: บันทึกข้อมูล PO (แก้ไขใหม่ตาม Requirement)
-# ==========================================
-elif menu == "📝 บันทึกข้อมูล PO":
-    st.markdown("### 📝 บันทึกการสั่งซื้อ (Batch PO Entry)")
-    st.info("💡 ระบบรองรับการเพิ่มสินค้าหลายรายการใน 1 PO, มีรูปภาพประกอบ และคำนวณต้นทุนอัตโนมัติ")
+# --- Dialog: PO Entry (Batch Mode) ---
+@st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
+def po_batch_dialog():
+    st.caption("💡 เพิ่มรายการสินค้าลงตระกร้า แล้วบันทึกทีเดียว (รองรับรับของไม่ครบ/แบ่งรับ)")
 
-    # --- Header ข้อมูลหลัก ---
+    # 1. Header (ใช้ร่วมกันทุกรายการในรอบนี้)
     with st.container(border=True):
         st.subheader("1. ข้อมูลหลัก (Header)")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: po_number = st.text_input("เลข PO (PO Number)", placeholder="เช่น PO-2412001")
-        with c2: transport_type = st.selectbox("ขนส่ง", ["ทางรถ", "ทางเรือ", "ทางอากาศ"])
-        with c3: order_date = st.date_input("วันที่สั่งซื้อ", date.today())
-        with c4: received_date = st.date_input("วันที่ได้รับ", date.today())
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        po_number = col_h1.text_input("เลข PO", placeholder="เช่น PO-2412001")
+        transport_type = col_h2.selectbox("ขนส่ง", ["ทางรถ", "ทางเรือ", "ทางอากาศ"])
+        order_date = col_h3.date_input("วันที่สั่งซื้อ", date.today())
+        received_date = col_h4.date_input("วันที่ได้รับ", date.today())
 
-    # --- ส่วนเพิ่มสินค้า ---
+    # 2. Item Entry
     with st.container(border=True):
-        st.subheader("2. รายละเอียดสินค้า")
+        st.subheader("2. เพิ่มสินค้า")
         
-        # ค้นหาสินค้า
+        # Product Selector
         prod_list = []
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-            
-        sel_prod = st.selectbox("เลือกสินค้า (SKU)", prod_list, placeholder="พิมพ์รหัสสินค้า...", index=None)
         
-        col_img, col_form = st.columns([1, 3])
+        sel_prod = st.selectbox("เลือกสินค้า (SKU)", prod_list, index=None, placeholder="พิมพ์รหัสสินค้า...")
         
-        # แสดงรูปภาพ (Requirement 1)
-        with col_img:
+        c_img, c_form = st.columns([1, 3])
+        
+        # Image Display
+        with c_img:
             if sel_prod:
                 pid = sel_prod.split(" : ")[0]
                 item_data = df_master[df_master['Product_ID'] == pid]
                 if not item_data.empty:
                     img_url = item_data.iloc[0].get('Image', '')
-                    if img_url and str(img_url).strip() != "":
-                        st.image(img_url, caption=pid, width=200)
-                    else:
-                        st.warning("ไม่มีรูปภาพ")
+                    if img_url: st.image(img_url, caption=pid, width=150)
+                    else: st.warning("No Image")
             else:
-                st.info("กรุณาเลือกสินค้า")
+                st.info("เลือกสินค้าเพื่อดูรูป")
+                pid = ""
 
-        # แบบฟอร์มกรอกข้อมูล
-        with col_form:
+        # Form Inputs
+        with c_form:
             r1c1, r1c2, r1c3 = st.columns(3)
-            with r1c1: qty = st.number_input("จำนวนที่รับ (Qty)", min_value=1, value=100, help="ใส่จำนวนที่ได้รับจริงรอบนี้")
-            with r1c2: ex_rate = st.number_input("เรทเงิน (Rate)", min_value=0.0, value=5.0, format="%.4f")
-            with r1c3: cbm = st.number_input("ขนาด คิว (CBM)", min_value=0.0, value=0.0, format="%.4f")
+            qty = r1c1.number_input("จำนวนที่รับ (Qty)", min_value=1, value=100, help="ใส่ยอดที่ได้รับจริงรอบนี้")
+            ex_rate = r1c2.number_input("เรทเงิน (Rate)", min_value=0.0, value=5.0, format="%.4f")
+            cbm = r1c3.number_input("ขนาด คิว (CBM)", min_value=0.0, value=0.0, format="%.4f")
             
             r2c1, r2c2, r2c3 = st.columns(3)
-            with r2c1: total_yuan = st.number_input("ราคารวม (หยวน)", min_value=0.0, value=0.0, help="ต้นทุนสินค้ารวมหน่วยหยวน")
-            with r2c2: ship_rate = st.number_input("เรทขนส่ง", min_value=0.0, value=5000.0)
-            with r2c3: weight = st.number_input("น้ำหนัก (KG)", min_value=0.0, value=0.0)
+            total_yuan = r2c1.number_input("ราคารวม (หยวน)", min_value=0.0, value=0.0, help="ราคารวมของสินค้านี้ทั้งหมด")
+            ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, value=5000.0)
+            weight = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, value=0.0)
             
-            with st.expander("ข้อมูลเพิ่มเติม (Market Price & Links)"):
+            with st.expander("ราคาตลาด & ข้อมูลเพิ่มเติม"):
                 m1, m2, m3 = st.columns(3)
-                p_shopee = m1.number_input("Shopee Price", 0)
-                p_lazada = m2.number_input("Lazada Price", 0)
-                p_tiktok = m3.number_input("TikTok Price", 0)
-                
+                p_shopee = m1.number_input("Shopee", 0)
+                p_lazada = m2.number_input("Lazada", 0)
+                p_tiktok = m3.number_input("TikTok", 0)
                 l1, l2 = st.columns(2)
                 link_shop = l1.text_input("Link Shop")
                 wechat = l2.text_input("WeChat ID")
-                note = st.text_area("หมายเหตุ", placeholder="เช่น สินค้าขาด, ชำรุด")
+                note = st.text_area("หมายเหตุ")
 
-        # ปุ่มเพิ่มลงตระกร้า
-        if st.button("➕ เพิ่มรายการลงตาราง", type="primary"):
+        # Add Button Logic
+        if st.button("➕ เพิ่มลงรายการ", type="primary"):
             if not po_number or not sel_prod:
-                st.error("กรุณากรอก เลข PO และ เลือกสินค้า")
+                st.error("⚠️ กรุณากรอกเลข PO และเลือกสินค้า")
             else:
-                # Auto Calculate (Requirement 4)
-                w_days, ship_cost, tot_thb, unit_thb, unit_yuan = calculate_po_metrics(
-                    order_date, received_date, qty, total_yuan, ex_rate, ship_rate, cbm
-                )
+                # --- Auto Calculations (ตามสูตรที่ขอ) ---
+                # 1. ระยะเวลา
+                wait_days = (received_date - order_date).days if received_date and order_date else 0
                 
-                # Mapping Column ใหม่ (Requirement 6)
+                # 2. ค่าส่ง = เรทขนส่ง * CBM
+                ship_cost = ship_rate * cbm
+                
+                # 3. ราคารวมบาท = หยวน * เรท
+                total_thb = total_yuan * ex_rate
+                
+                # 4. ราคา/ชิ้น (บาท) = ((หยวน*เรท) + ค่าส่ง) / จำนวน
+                unit_cost_thb = ((total_yuan * ex_rate) + ship_cost) / qty if qty > 0 else 0
+                
+                # 5. ราคา/ชิ้น (หยวน) = ราคาหยวน / จำนวน
+                unit_price_yuan = total_yuan / qty if qty > 0 else 0
+
+                # Append to Temp List
                 new_item = {
-                    "รหัสสินค้า": pid,
-                    "เลข PO": po_number,
-                    "ขนส่ง": transport_type,
-                    "วันที่สั่งซื้อ": str(order_date),
-                    "วันที่ได้รับ": str(received_date),
-                    "ระยะเวลา": w_days,
-                    "จำนวน": qty,
-                    "ราคา/ชิ้น": round(unit_thb, 2),
-                    "ราคา (หยวน)": total_yuan,
-                    "ราคา (บาท)": round(tot_thb, 2),
-                    "เรทเงิน": ex_rate,
-                    "เรทค่าขนส่ง": ship_rate,
-                    "ขนาด (คิว)": cbm,
-                    "ค่าส่ง": round(ship_cost, 2),
-                    "น้ำหนัก / KG": weight,
-                    "ราคา / ชิ้น (หยวน)": round(unit_yuan, 4),
-                    "SHOPEE": p_shopee,
-                    "LAZADA": p_lazada,
-                    "TIKTOK": p_tiktok,
-                    "หมายเหตุ": note,
-                    "Link_Shop": link_shop,
+                    "Product_ID": pid,
+                    "PO_Number": po_number,
+                    "Transport": transport_type,
+                    "Order_Date": str(order_date),
+                    "Received_Date": str(received_date),
+                    "Wait_Days": wait_days,
+                    "Qty": qty,
+                    "Unit_Cost_THB": round(unit_cost_thb, 2),
+                    "Total_Yuan": total_yuan,
+                    "Total_THB": round(total_thb, 2),
+                    "Ex_Rate": ex_rate,
+                    "Ship_Rate": ship_rate,
+                    "CBM": cbm,
+                    "Ship_Cost": round(ship_cost, 2),
+                    "Weight": weight,
+                    "Unit_Price_Yuan": round(unit_price_yuan, 4),
+                    "Shopee": p_shopee,
+                    "Lazada": p_lazada,
+                    "Tiktok": p_tiktok,
+                    "Note": note,
+                    "Link": link_shop,
                     "WeChat": wechat
                 }
-                st.session_state.po_cart.append(new_item)
-                st.success(f"เพิ่ม {pid} เรียบร้อย!")
+                st.session_state.po_temp_cart.append(new_item)
+                st.success(f"เพิ่ม {pid} แล้ว!")
 
-    # --- ตาราง Preview และ ปุ่มบันทึก ---
-    if len(st.session_state.po_cart) > 0:
+    # 3. Preview & Save
+    if len(st.session_state.po_temp_cart) > 0:
         st.divider()
-        st.subheader(f"🛒 รายการรอการบันทึก ({len(st.session_state.po_cart)} รายการ)")
+        st.markdown(f"##### 🛒 รายการรอการบันทึก ({len(st.session_state.po_temp_cart)})")
+        df_cart = pd.DataFrame(st.session_state.po_temp_cart)
         
-        # จัดลำดับคอลัมน์ให้ตรงเป๊ะตาม Requirement 5 & 6
-        cols_order = [
-            "รหัสสินค้า", "เลข PO", "ขนส่ง", "วันที่สั่งซื้อ", "วันที่ได้รับ", "ระยะเวลา", 
-            "จำนวน", "ราคา/ชิ้น", "ราคา (หยวน)", "ราคา (บาท)", "เรทเงิน", "เรทค่าขนส่ง", 
-            "ขนาด (คิว)", "ค่าส่ง", "น้ำหนัก / KG", "ราคา / ชิ้น (หยวน)", 
-            "SHOPEE", "LAZADA", "TIKTOK", "หมายเหตุ", "Link_Shop", "WeChat"
-        ]
+        # Show simplified table
+        st.dataframe(df_cart[["Product_ID", "Qty", "Total_Yuan", "Unit_Cost_THB"]], use_container_width=True, hide_index=True)
         
-        df_cart = pd.DataFrame(st.session_state.po_cart)
-        # เผื่อไว้กรณี key ไหนหาย
-        for col in cols_order:
-            if col not in df_cart.columns: df_cart[col] = ""
-            
-        df_display = df_cart[cols_order]
-        
-        st.dataframe(
-            df_display, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "ราคา (หยวน)": st.column_config.NumberColumn(format="%.2f ¥"),
-                "ราคา (บาท)": st.column_config.NumberColumn(format="%.2f ฿"),
-                "ราคา/ชิ้น": st.column_config.NumberColumn(format="%.2f ฿"),
-            }
-        )
-
-        b_col1, b_col2 = st.columns([1, 4])
-        with b_col1:
-            if st.button("🗑️ ล้างทั้งหมด", type="secondary"):
-                st.session_state.po_cart = []
+        col_s1, col_s2 = st.columns([1, 4])
+        with col_s1:
+            if st.button("🗑️ ล้างรายการ", type="secondary"):
+                st.session_state.po_temp_cart = []
                 st.rerun()
-            
-        with b_col2:
-            if st.button("💾 บันทึกข้อมูลลง Google Sheets", type="primary"):
-                try:
-                    creds = get_credentials()
-                    gc = gspread.authorize(creds)
-                    sh = gc.open_by_key(MASTER_SHEET_ID)
-                    ws = sh.worksheet(TAB_NAME_PO)
-                    
-                    # Append Rows
-                    data_values = df_display.values.tolist()
-                    ws.append_rows(data_values)
-                    
-                    st.success("✅ บันทึกข้อมูลสำเร็จ!")
-                    st.session_state.po_cart = []
-                    st.cache_data.clear()
-                    time.sleep(2)
+        with col_s2:
+            if st.button("💾 บันทึกทั้งหมดลง Google Sheets", type="primary"):
+                # Prepare data for Google Sheets (22 Columns Exact Order)
+                rows_to_add = []
+                for item in st.session_state.po_temp_cart:
+                    row = [
+                        item["Product_ID"],         # 1. SKU
+                        item["PO_Number"],          # 2. PO Number
+                        item["Transport"],          # 3. Transport
+                        item["Order_Date"],         # 4. Order Date
+                        item["Received_Date"],      # 5. Recv Date
+                        item["Wait_Days"],          # 6. Wait Days
+                        item["Qty"],                # 7. Qty
+                        item["Unit_Cost_THB"],      # 8. Cost/Piece (THB)
+                        item["Total_Yuan"],         # 9. Total RMB
+                        item["Total_THB"],          # 10. Total THB
+                        item["Ex_Rate"],            # 11. Rate
+                        item["Ship_Rate"],          # 12. Ship Rate
+                        item["CBM"],                # 13. CBM
+                        item["Ship_Cost"],          # 14. Ship Cost
+                        item["Weight"],             # 15. Weight
+                        item["Unit_Price_Yuan"],    # 16. Cost/Piece (RMB)
+                        item["Shopee"],             # 17. Shopee
+                        item["Lazada"],             # 18. Lazada
+                        item["Tiktok"],             # 19. Tiktok
+                        item["Note"],               # 20. Note
+                        item["Link"],               # 21. Link
+                        item["WeChat"]              # 22. WeChat
+                    ]
+                    rows_to_add.append(row)
+                
+                if save_po_batch_to_sheet(rows_to_add):
+                    st.success("✅ บันทึกข้อมูลสำเร็จเรียบร้อย!")
+                    st.session_state.po_temp_cart = []
+                    time.sleep(1)
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error saving data: {e}")
 
 # ==========================================
-# ส่วนที่ 3: Stock Report (Logic เดิม)
+# 6. TABS & UI LOGIC
 # ==========================================
-elif menu == "📈 รายงาน Stock":
-    st.subheader("📈 รายงาน Stock")
+tab1, tab2, tab3 = st.tabs(["📅 สรุปยอดขายรายวัน", "📝 รายการสั่งซื้อ (PO)", "📈 รายงาน Stock"])
+
+dialog_action = None 
+dialog_data = None
+
+# ==========================================
+# TAB 1: Daily Sales Report (คงเดิมตามที่คุณขอ)
+# ==========================================
+with tab1:
+    st.subheader("📅 สรุปยอดขายรายวัน")
+    # ... (ส่วนนี้คง Logic เดิม 100% ตามไฟล์ที่คุณส่งมา) ...
     
-    if not df_master.empty:
-        # Merge Stock Logic
+    if "history_pid" in st.query_params:
+        hist_pid = st.query_params["history_pid"]
+        st.query_params.clear() 
+        show_history_dialog(fixed_product_id=hist_pid)
+
+    thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", 
+                   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+    today = date.today()
+    all_years = [today.year - i for i in range(3)]
+
+    def update_m_dates():
+        y = st.session_state.m_y
+        m_index = thai_months.index(st.session_state.m_m) + 1
+        _, last_day = calendar.monthrange(y, m_index)
+        st.session_state.m_d_start = date(y, m_index, 1)
+        st.session_state.m_d_end = date(y, m_index, last_day)
+
+    if "m_d_start" not in st.session_state: st.session_state.m_d_start = date(today.year, today.month, 1)
+    if "m_d_end" not in st.session_state:
+        _, last_day = calendar.monthrange(today.year, today.month)
+        st.session_state.m_d_end = date(today.year, today.month, last_day)
+
+    # Filter
+    with st.container(border=True):
+        st.markdown("##### 🔍 ตัวกรองข้อมูล")
+        c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
+        with c_y: st.selectbox("ปี", all_years, key="m_y", on_change=update_m_dates)
+        with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
+        with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
+        with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
+        
+        col_cat, col_sku = st.columns([1.5, 3])
+        category_options = ["แสดงทั้งหมด"]
+        if not df_master.empty and 'Product_Type' in df_master.columns:
+            unique_types = sorted(df_master['Product_Type'].astype(str).unique().tolist())
+            category_options += unique_types
+        sku_options = []
+        if not df_master.empty:
+            sku_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+
+        with col_cat: selected_category = st.selectbox("หมวดหมู่สินค้า", category_options, key="filter_category")
+        with col_sku: selected_skus = st.multiselect("รายการที่เลือก (Choose options):", sku_options, key="filter_skus")
+
+    start_date = st.session_state.m_d_start
+    end_date = st.session_state.m_d_end
+    
+    if start_date and end_date:
+        if not df_sale.empty and 'Date_Only' in df_sale.columns:
+            mask_range = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
+            df_sale_range = df_sale.loc[mask_range].copy()
+            
+            if not df_sale_range.empty:
+                thai_abbr = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+                df_sale_range['Day_Col'] = df_sale_range['Order_Time'].apply(lambda x: f"{x.day} {thai_abbr[x.month]}")
+                df_sale_range['Day_Sort'] = df_sale_range['Order_Time'].dt.strftime('%Y%m%d')
+                
+                pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
+                df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
+                
+                df_pivot = df_pivot.reset_index()
+                final_report = pd.merge(df_master, df_pivot, on='Product_ID', how='left')
+                
+                day_cols = [c for c in final_report.columns if c not in df_master.columns]
+                final_report[day_cols] = final_report[day_cols].fillna(0).astype(int)
+                
+                if selected_category != "แสดงทั้งหมด":
+                    final_report = final_report[final_report['Product_Type'] == selected_category]
+                if selected_skus:
+                    selected_ids = [item.split(" : ")[0] for item in selected_skus]
+                    final_report = final_report[final_report['Product_ID'].isin(selected_ids)]
+                
+                if not final_report.empty:
+                    final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
+                    stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
+                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
+                    
+                    pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
+                    sorted_day_cols = sorted(day_cols, key=lambda x: pivot_data_temp[pivot_data_temp['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data_temp['Day_Col'].values else 0)
+
+                    fixed_cols = ['Product_ID', 'Image', 'Product_Name', 'Product_Type', 'Current_Stock', 'Total_Sales_Range', 'Status']
+                    available_fixed = [c for c in fixed_cols if c in final_report.columns]
+                    final_df = final_report[available_fixed + sorted_day_cols]
+                    
+                    st.divider()
+                    st.dataframe(final_df, use_container_width=True, hide_index=True,
+                        column_config={"Image": st.column_config.ImageColumn(width=40)})
+                else:
+                    st.warning("ไม่พบข้อมูลตามตัวกรอง")
+            else:
+                st.info("ไม่มีข้อมูลการขายในช่วงวันที่เลือก")
+        else:
+            st.warning("ไม่มีข้อมูลการขาย")
+
+# ==========================================
+# TAB 2: Purchase Orders (แก้ไขใหม่เป็น Pop-up Batch Entry)
+# ==========================================
+with tab2:
+    col_head, col_action = st.columns([4, 2])
+    with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า (PO)")
+    with col_action:
+        if st.button("➕ เพิ่ม PO ใหม่ (POP-UP)", type="primary", key="btn_add_po_popup"): 
+            dialog_action = "po_batch"
+    
+    # ส่วนแสดงตาราง History (แสดง 22 คอลัมน์ที่เพิ่มไป)
+    if not df_po.empty:
+        # Reorder columns if they exist to match requirement for display
+        desired_cols = ["Product_ID", "PO_Number", "Order_Date", "Received_Date", "Qty", "Total_THB", "Transport"]
+        # Map actual columns from Sheet (Header names from Sheet 1 Row 1)
+        # Assumes the sheet headers are correct or similar. 
+        # If headers in sheet are English (based on save function), we just show what we have.
+        st.dataframe(df_po, use_container_width=True, hide_index=True)
+    else:
+        st.info("ยังไม่มีข้อมูล PO ในระบบ")
+
+# ==========================================
+# TAB 3: Stock Report (คงเดิม)
+# ==========================================
+with tab3:
+    st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
+    
+    if not df_master.empty and 'Product_ID' in df_master.columns:
         df_stock_report = df_master.copy()
-        df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0)
+        
+        # Merge recent sold
+        df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
+        
+        # Calculate Stock
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
         
+        if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
+        else: df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(10).astype(int)
+
         def calc_status(row):
-            limit = int(row.get('Min_Limit', 10) if row.get('Min_Limit') != '' else 10)
             if row['Current_Stock'] <= 0: return "🔴 หมดเกลี้ยง"
-            elif row['Current_Stock'] < limit: return "⚠️ ใกล้หมด"
+            elif row['Current_Stock'] < row['Min_Limit']: return "⚠️ ใกล้หมด"
             return "🟢 มีของ"
             
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
-        # Display
-        st.data_editor(
-            df_stock_report[["Product_ID", "Image", "Product_Name", "Current_Stock", "Status", "Min_Limit"]],
+        # Filters
+        c_filt, c_srch = st.columns([2, 2])
+        with c_filt: 
+            status_options = ["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"]
+            sel_stat = st.multiselect("สถานะ", status_options)
+        with c_srch:
+            srch_txt = st.text_input("ค้นหา", placeholder="ชื่อ/รหัส")
+
+        edit_df = df_stock_report.copy()
+        if sel_stat: edit_df = edit_df[edit_df['Status'].isin(sel_stat)]
+        if srch_txt: 
+            edit_df = edit_df[edit_df['Product_ID'].str.contains(srch_txt, case=False) | edit_df['Product_Name'].str.contains(srch_txt, case=False)]
+
+        col_c1, col_c2 = st.columns([4, 1])
+        with col_c1: st.info(f"ขายล่าสุดถึง: {latest_date_str}")
+        with col_c2: 
+            if st.button("💾 บันทึก Limit"): 
+                if "edited_stock_data" in st.session_state:
+                    update_master_limits(st.session_state.edited_stock_data)
+                    st.rerun()
+
+        # Data Editor
+        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Recent_Sold", "Status", "Min_Limit"]
+        edited_df = st.data_editor(
+            edit_df[final_cols],
             column_config={
-                "Image": st.column_config.ImageColumn(width=60),
-                "Current_Stock": st.column_config.NumberColumn(help=f"Stock ตั้งต้น - ยอดขายถึง {latest_date_str}"),
+                "Image": st.column_config.ImageColumn(width=50),
+                "Product_ID": st.column_config.TextColumn(disabled=True),
+                "Product_Name": st.column_config.TextColumn(disabled=True),
+                "Current_Stock": st.column_config.NumberColumn(disabled=True),
+                "Min_Limit": st.column_config.NumberColumn("🔔 เตือนเมื่อต่ำกว่า", min_value=0)
             },
-            use_container_width=True, hide_index=True, height=800
+            use_container_width=True, hide_index=True, key="edited_stock_data", height=800
         )
     else:
-        st.warning("ไม่พบข้อมูล Master Data")
+        st.warning("ไม่พบข้อมูล Master")
+
+# ==========================================
+# 🛑 EXECUTE DIALOGS
+# ==========================================
+if dialog_action == "po_batch":
+    po_batch_dialog()
