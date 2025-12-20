@@ -336,10 +336,10 @@ def po_batch_dialog():
 
     # 1. Header
     with st.container(border=True):
-        st.subheader("1. ข้อมูลหลัก (Header)")
+        st.subheader("1. ข้อมูลสินค้า")
         c1, c2, c3, c4 = st.columns(4)
         po_number = c1.text_input("เลข PO", placeholder="PO-XXXX")
-        transport_type = c2.selectbox("ขนส่ง", ["ทางรถ", "ทางเรือ", "ทางอากาศ"])
+        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"])
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today())
         received_date = c4.date_input("วันที่ได้รับ", date.today())
 
@@ -364,16 +364,16 @@ def po_batch_dialog():
         
         with col_in:
             r1c1, r1c2, r1c3 = st.columns(3)
-            qty = r1c1.number_input("จำนวน (Qty)", min_value=1, value=100)
-            ex_rate = r1c2.number_input("เรทเงิน", value=5.0)
-            cbm = r1c3.number_input("CBM", value=0.0, format="%.4f")
+            qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=100)
+            ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=5.0)
+            cbm = r1c3.number_input("เรทเงินหยวน", value=0.0, format="%.4f")
             
             r2c1, r2c2, r2c3 = st.columns(3)
             total_yuan = r2c1.number_input("รวมหยวน", value=0.0)
-            ship_rate = r2c2.number_input("เรทขนส่ง", value=5000.0)
-            weight = r2c3.number_input("นน. (KG)", value=0.0)
+            ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=5000.0)
+            weight = r2c3.number_input("ขนาด (คิว)", value=0.0)
             
-            with st.expander("เพิ่มเติม (ราคาตลาด/Link)"):
+            with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
                 m1, m2, m3 = st.columns(3)
                 p_shopee = m1.number_input("Shopee", 0)
                 p_lazada = m2.number_input("Lazada", 0)
@@ -381,7 +381,7 @@ def po_batch_dialog():
                 l1, l2 = st.columns(2)
                 shop_link = l1.text_input("Link")
                 wechat_id = l2.text_input("WeChat")
-                note = st.text_area("Note")
+                note = st.text_area("หมายเหตุ")
 
         if st.button("➕ เพิ่มลงตระกร้า"):
             if po_number and sel_prod:
@@ -561,10 +561,10 @@ with tab1:
                         .daily-sales-table tbody tr:hover td { background-color: #333 !important; }
                         .negative-value { color: #FF0000 !important; font-weight: bold !important; }
                         .col-history { width: 50px !important; min-width: 50px !important; }
-                        .col-small { width: 70px !important; min-width: 70px !important; }
-                        .col-medium { width: 70px !important; min-width: 70px !important; }
+                        .col-small { width: 90px !important; min-width: 90px !important; }
+                        .col-medium { width: 90px !important; min-width: 90px !important; }
                         .col-image { width: 55px !important; min-width: 55px !important; }
-                        .col-name { width: 130px !important; min-width: 130px !important; text-align: left !important; }
+                        .col-name { width: 150px !important; min-width: 150px !important; text-align: left !important; }
                         a.history-link { text-decoration: none; color: white; font-size: 16px; cursor: pointer; }
                         a.history-link:hover { transform: scale(1.2); }
                     </style>
