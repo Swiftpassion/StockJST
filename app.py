@@ -562,9 +562,9 @@ with tab1:
                         .negative-value { color: #FF0000 !important; font-weight: bold !important; }
                         .col-history { width: 50px !important; min-width: 50px !important; }
                         .col-small { width: 70px !important; min-width: 70px !important; }
-                        .col-medium { width: 90px !important; min-width: 90px !important; }
-                        .col-image { width: 60px !important; min-width: 60px !important; }
-                        .col-name { width: 200px !important; min-width: 200px !important; text-align: left !important; }
+                        .col-medium { width: 70px !important; min-width: 70px !important; }
+                        .col-image { width: 55px !important; min-width: 55px !important; }
+                        .col-name { width: 130px !important; min-width: 130px !important; text-align: left !important; }
                         a.history-link { text-decoration: none; color: white; font-size: 16px; cursor: pointer; }
                         a.history-link:hover { transform: scale(1.2); }
                     </style>
