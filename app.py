@@ -363,48 +363,66 @@ def po_batch_dialog():
                     if img: st.image(img, width=150)
         
         with col_in:
-        r1c1, r1c2, r1c3 = st.columns(3)
-    
-        # 1. ปรับ value=None และเพิ่ม placeholder
-        qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=None, placeholder="กรอกจำนวน")
-        ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
-        cbm = r1c3.number_input("เรทเงินหยวน", value=None, format="%.4f", placeholder="0.0000")
-    
-        r2c1, r2c2, r2c3 = st.columns(3)
-        total_yuan = r2c1.number_input("รวมหยวน", value=None, placeholder="0.00")
-        ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=None, placeholder="5000.0") 
-        weight = r2c3.number_input("ขนาด (คิว)", value=None, placeholder="0.00")
-    
-        with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
-        m1, m2, m3 = st.columns(3)
-        p_shopee = m1.number_input("Shopee", value=None, placeholder="0")
-        p_lazada = m2.number_input("Lazada", value=None, placeholder="0")
-        p_tiktok = m3.number_input("TikTok", value=None, placeholder="0")
-                l1, l2 = st.columns(2)
-                shop_link = l1.text_input("Link")
-                wechat_id = l2.text_input("WeChat")
-                note = st.text_area("หมายเหตุ")
+            # 1. ใช้ st.form เพื่อให้เคลียร์ค่าได้ (clear_on_submit=True)
+            with st.form("add_item_form", clear_on_submit=True):
+                r1c1, r1c2, r1c3 = st.columns(3)
+                # ใช้ value=None และ placeholder ตามที่คุณต้องการ
+                qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=None, placeholder="กรอกจำนวน")
+                ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
+                cbm = r1c3.number_input("เรทเงินหยวน", value=None, format="%.4f", placeholder="0.0000")
+            
+                r2c1, r2c2, r2c3 = st.columns(3)
+                total_yuan = r2c1.number_input("รวมหยวน", value=None, placeholder="0.00")
+                ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=None, placeholder="5000.0") 
+                weight = r2c3.number_input("ขนาด (คิว)", value=None, placeholder="0.00")
+            
+                with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
+                    m1, m2, m3 = st.columns(3)
+                    p_shopee = m1.number_input("Shopee", value=None, placeholder="0")
+                    p_lazada = m2.number_input("Lazada", value=None, placeholder="0")
+                    p_tiktok = m3.number_input("TikTok", value=None, placeholder="0")
+                    
+                    l1, l2 = st.columns(2)
+                    shop_link = l1.text_input("Link")
+                    wechat_id = l2.text_input("WeChat")
+                    note = st.text_area("หมายเหตุ")
 
-        if st.button("➕ เพิ่มลงตระกร้า"):
-            if po_number and sel_prod:
+                # 2. ปุ่ม Submit ของ Form
+                submitted = st.form_submit_button("➕ เพิ่มลงตระกร้า", type="primary")
+
+        # 3. Logic การบันทึก (อยู่นอก form แต่เช็คตัวแปร submitted)
+        if submitted:
+            # แปลงค่า None ให้เป็น 0 หรือค่า Default ก่อนคำนวณ เพื่อป้องกัน Error
+            c_qty = qty if qty is not None else 0
+            c_ex_rate = ex_rate if ex_rate is not None else 0.0
+            c_cbm = cbm if cbm is not None else 0.0
+            c_total_yuan = total_yuan if total_yuan is not None else 0.0
+            c_ship_rate = ship_rate if ship_rate is not None else 0.0
+            c_weight = weight if weight is not None else 0.0
+
+            if po_number and sel_prod and c_qty > 0:
                 # Calculation
                 wait_days = (received_date - order_date).days if received_date and order_date else 0
-                ship_cost = ship_rate * cbm
-                total_thb = total_yuan * ex_rate
-                unit_thb = ((total_yuan * ex_rate) + ship_cost) / qty if qty > 0 else 0
-                unit_yuan = total_yuan / qty if qty > 0 else 0
+                ship_cost = c_ship_rate * c_cbm
+                total_thb = c_total_yuan * c_ex_rate
+                
+                # ป้องกันการหารด้วย 0
+                unit_thb = (total_thb + ship_cost) / c_qty if c_qty > 0 else 0
+                unit_yuan = c_total_yuan / c_qty if c_qty > 0 else 0
                 
                 item = {
                     "SKU": pid, "PO": po_number, "Trans": transport_type,
                     "Ord": str(order_date), "Recv": str(received_date), "Wait": wait_days,
-                    "Qty": qty, "UnitTHB": round(unit_thb,2), "TotYuan": total_yuan,
-                    "TotTHB": round(total_thb,2), "Rate": ex_rate, "ShipRate": ship_rate,
-                    "CBM": cbm, "ShipCost": round(ship_cost,2), "W": weight,
-                    "UnitYuan": round(unit_yuan,4), "Shopee": p_shopee, "Laz": p_lazada,
+                    "Qty": c_qty, "UnitTHB": round(unit_thb, 2), "TotYuan": c_total_yuan,
+                    "TotTHB": round(total_thb, 2), "Rate": c_ex_rate, "ShipRate": c_ship_rate,
+                    "CBM": c_cbm, "ShipCost": round(ship_cost, 2), "W": c_weight,
+                    "UnitYuan": round(unit_yuan, 4), "Shopee": p_shopee, "Laz": p_lazada,
                     "Tik": p_tiktok, "Note": note, "Link": shop_link, "WeChat": wechat_id
                 }
                 st.session_state.po_temp_cart.append(item)
-                st.success(f"เพิ่ม {pid} แล้ว")
+                st.success(f"เพิ่ม {pid} แล้ว (ล้างค่าเรียบร้อย)")
+            else:
+                st.error("กรุณากรอกข้อมูล เลข PO, เลือกสินค้า และระบุจำนวนให้ครบถ้วน")
 
     # 3. Preview & Save
     if st.session_state.po_temp_cart:
