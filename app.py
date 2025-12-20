@@ -363,21 +363,23 @@ def po_batch_dialog():
                     if img: st.image(img, width=150)
         
         with col_in:
-            r1c1, r1c2, r1c3 = st.columns(3)
-            qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=100)
-            ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=5.0)
-            cbm = r1c3.number_input("เรทเงินหยวน", value=0.0, format="%.4f")
-            
-            r2c1, r2c2, r2c3 = st.columns(3)
-            total_yuan = r2c1.number_input("รวมหยวน", value=0.0)
-            ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=5000.0)
-            weight = r2c3.number_input("ขนาด (คิว)", value=0.0)
-            
-            with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
-                m1, m2, m3 = st.columns(3)
-                p_shopee = m1.number_input("Shopee", 0)
-                p_lazada = m2.number_input("Lazada", 0)
-                p_tiktok = m3.number_input("TikTok", 0)
+        r1c1, r1c2, r1c3 = st.columns(3)
+    
+        # 1. ปรับ value=None และเพิ่ม placeholder
+        qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=None, placeholder="กรอกจำนวน")
+        ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
+        cbm = r1c3.number_input("เรทเงินหยวน", value=None, format="%.4f", placeholder="0.0000")
+    
+        r2c1, r2c2, r2c3 = st.columns(3)
+        total_yuan = r2c1.number_input("รวมหยวน", value=None, placeholder="0.00")
+        ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=None, placeholder="5000.0") 
+        weight = r2c3.number_input("ขนาด (คิว)", value=None, placeholder="0.00")
+    
+        with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
+        m1, m2, m3 = st.columns(3)
+        p_shopee = m1.number_input("Shopee", value=None, placeholder="0")
+        p_lazada = m2.number_input("Lazada", value=None, placeholder="0")
+        p_tiktok = m3.number_input("TikTok", value=None, placeholder="0")
                 l1, l2 = st.columns(2)
                 shop_link = l1.text_input("Link")
                 wechat_id = l2.text_input("WeChat")
