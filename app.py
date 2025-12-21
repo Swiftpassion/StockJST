@@ -682,15 +682,52 @@ with tab2:
 
         # Render Table
         if not df_final.empty:
-            if 'Order_Date' in df_final.columns: df_final['Order_Date'] = df_final['Order_Date'].dt.strftime('%Y-%m-%d')
+            # 1. จัด Format วันที่ (ถ้ามี)
+            if 'Order_Date' in df_final.columns: 
+                df_final['Order_Date'] = df_final['Order_Date'].dt.strftime('%Y-%m-%d')
+
+            # 2. สร้างตัวแปรจับคู่ชื่อ (อังกฤษ -> ไทย) สำหรับแสดงผล
+            col_rename_map = {
+                'Product_ID': 'รหัสสินค้า',
+                'PO_Number': 'เลข PO',
+                'Transport_Type': 'ขนส่ง',
+                'Order_Date': 'วันที่สั่งซื้อ',
+                'Received_Date': 'วันที่ได้รับ',
+                'Qty_Ordered': 'จำนวน',
+                'Price_Unit_NoVAT': 'ราคา/ชิ้น',
+                'Total_Yuan': 'ราคา (หยวน)',
+                'Total_THB': 'ราคา (บาท)',
+                'Yuan_Rate': 'เรทเงิน',
+                'Ship_Rate': 'เรทค่าขนส่ง',
+                'CBM': 'ขนาด (คิว)',
+                'Ship_Cost': 'ค่าส่ง',
+                'Transport_Weight': 'น้ำหนัก / KG',
+                'Shopee_Price': 'SHOPEE',
+                'Lazada_Price': 'LAZADA',
+                'TikTok_Price': 'TIKTOK',
+                'Note': 'หมายเหตุ',
+                'Link': 'Link_Shop',
+                'Product_Name': 'ชื่อสินค้า',
+                'Image': 'รูป',
+                'Product_Type': 'หมวดหมู่',
+                'Qty_Remaining': 'คงเหลือ (PO)'
+            }
+
+            # 3. เปลี่ยนชื่อคอลัมน์เพื่อสร้างตารางสำหรับโชว์ (df_show)
+            # ใช้ .rename เพื่อไม่ให้กระทบ df_final ตัวจริง
+            df_show = df_final.rename(columns=col_rename_map)
+
+            # 4. แสดงผล (สังเกตว่าใน config ต้องใช้ชื่อภาษาไทยตามที่เปลี่ยนแล้ว)
             st.dataframe(
-                df_final.style.map(highlight_negative),
+                df_show.style.map(highlight_negative),
                 column_config={
-                    "Image": st.column_config.ImageColumn("รูปสินค้า", width=80),
-                    "PO_Number": st.column_config.TextColumn("เลข PO"),
-                    "Total_Yuan": st.column_config.NumberColumn("ยอดหยวน", format="%.2f"),
+                    "รูป": st.column_config.ImageColumn("รูปสินค้า", width=80), 
+                    "เลข PO": st.column_config.TextColumn("เลข PO"),
+                    "ราคา (หยวน)": st.column_config.NumberColumn("ราคา (หยวน)", format="%.2f"),
+                    "ราคา (บาท)": st.column_config.NumberColumn("ราคา (บาท)", format="%.2f"),
                 },
-                use_container_width=True, hide_index=True
+                use_container_width=True, 
+                hide_index=True
             )
         else: st.warning("⚠️ ไม่พบรายการ")
     else: st.info("ยังไม่มีข้อมูล PO")
