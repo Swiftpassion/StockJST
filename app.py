@@ -263,6 +263,10 @@ def update_master_limits(df_edited):
 # 4. Main App & Data Loading
 # ==========================================
 st.title("📊 JST Hybrid Management System")
+# --- [เพิ่มบรรทัดนี้] : กำหนดตัวแปรจำสถานะหน้าต่าง ---
+if "active_dialog" not in st.session_state:
+    st.session_state.active_dialog = None 
+# ------------------------------------------------
 
 if "selected_product_history" not in st.session_state: st.session_state.selected_product_history = None
 if 'po_temp_cart' not in st.session_state: st.session_state.po_temp_cart = [] # ตระกร้าสินค้า
@@ -496,15 +500,23 @@ def po_batch_dialog():
             st.rerun()
             
         if c2.button("💾 บันทึกทั้งหมด", type="primary"):
+            # ... (โค้ดเตรียม data rows_to_save เหมือนเดิม) ...
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
-                row = [i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"], i["Qty"], 0, i["TotYuan"], i["TotTHB"],
+                 # ... (logic เดิม) ...
+                 row = [i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"], i["Qty"], 0, i["TotYuan"], i["TotTHB"],
                        i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], i["UnitYuan"], i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"]]
-                rows_to_save.append(row)
+                 rows_to_save.append(row)
+
             if save_po_batch_to_sheet(rows_to_save):
                 st.success("บันทึกสำเร็จ!")
                 st.session_state.po_temp_cart = []
                 if "bp_po_num" in st.session_state: del st.session_state["bp_po_num"]
+                
+                # --- [เพิ่มบรรทัดนี้] : สั่งปิดหน้าต่างเมื่อทำงานจบ ---
+                st.session_state.active_dialog = None 
+                # -----------------------------------------------
+                
                 time.sleep(1)
                 st.rerun()
 # ==========================================
@@ -680,13 +692,14 @@ with tab2:
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
-            # ปุ่มเพิ่ม -> เรียกฟังก์ชัน Batch Entry (ของใหม่)
+            # เปลี่ยน logic เป็นการ set session_state
             if st.button("➕ เพิ่ม PO ใหม่", type="primary", key="btn_add_po_tab2"): 
-                dialog_action = "po_batch"
+                st.session_state.active_dialog = "po_batch"
+                st.rerun() # สั่ง rerun เพื่อเปิดหน้าต่างทันที
         with b2:
-            # ปุ่มแก้ไข -> เรียกฟังก์ชัน Edit (ของเดิม)
             if st.button("🔍 ค้นหา & แก้ไข", type="secondary", key="btn_search_po_tab2"): 
-                dialog_action = "po_search"
+                st.session_state.active_dialog = "po_search"
+                st.rerun()
 
     if not df_po.empty and not df_master.empty:
         # Merge ข้อมูลเพื่อแสดงผล
@@ -850,11 +863,13 @@ with tab3:
     else: st.warning("ไม่พบข้อมูล Master Product")
 
 # ==========================================
-# 🛑 EXECUTE DIALOGS
+# 🛑 EXECUTE DIALOGS (แก้ไขใหม่)
 # ==========================================
-if dialog_action == "po_batch":
-    po_batch_dialog() # ใช้แบบใหม่ (Batch)
-elif dialog_action == "po_search":
-    po_form_dialog(mode="search") # ใช้แบบเดิม (Edit)
-elif dialog_action == "history" and dialog_data:
+if st.session_state.active_dialog == "po_batch":
+    po_batch_dialog()
+elif st.session_state.active_dialog == "po_search":
+    po_form_dialog(mode="search")
+elif st.session_state.active_dialog == "history" and dialog_data:
+    # กรณี History อาจต้องปรับ logic เพิ่มเล็กน้อยถ้าใช้ session แบบเดียวกัน
+    # แต่สำหรับ PO Batch ใช้ logic ด้านบนนี้แก้ปัญหาได้เลยครับ
     show_history_dialog(fixed_product_id=dialog_data)
