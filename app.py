@@ -330,13 +330,25 @@ def po_form_dialog(mode="search"):
             st.warning("ฟังก์ชันแก้ไขแบบเดิม (Demo: ยังไม่เชื่อมต่อ Save ใหม่ เนื่องจากโครงสร้างเปลี่ยน)")
 
 # ==========================================
-# [NEW] ฟังก์ชันบันทึกแบบ Batch (แก้ Error StreamlitAPIException ด้วย Callback)
+# [NEW] ฟังก์ชันบันทึกแบบ Batch (Fix หน้าขาว + Reset ค่าเสถียร)
 # ==========================================
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
     st.caption("💡 กรอกข้อมูลสินค้า -> กดเพิ่มลงตระกร้า (รายการจะไปกองรวมด้านล่าง) -> กดบันทึก Database ทีเดียว")
 
-    # --- ส่วนที่ 1: Header ---
+    # --- 0. ส่วนจัดการ Reset ค่า (ทำงานก่อนวาดหน้าจอเสมอ) ---
+    # ตรวจสอบว่ารอบที่แล้วมีการสั่งให้ Reset หรือไม่
+    if st.session_state.get("need_reset_inputs", False):
+        # ล้างค่าใน Session State ที่ผูกกับ Widget
+        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight"]
+        for key in keys_to_reset:
+            if key in st.session_state:
+                del st.session_state[key] # ลบทิ้งเพื่อให้ Widget กลับไปใช้ค่า Default
+        
+        # ปิด Flag เมื่อทำเสร็จ
+        st.session_state["need_reset_inputs"] = False
+
+    # --- 1. Header (ค่าพวกนี้จะไม่ถูกลบ) ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
@@ -344,13 +356,14 @@ def po_batch_dialog():
         transport_type = c2.selectbox("การขนส่ง", ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"], key="bp_trans")
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
 
-    # --- ส่วนที่ 2: ข้อมูลสินค้า ---
+    # --- 2. ข้อมูลสินค้า ---
     with st.container(border=True):
         st.subheader("2. รายละเอียดสินค้า")
         prod_list = []
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
+        # Widget เหล่านี้จะถูก Reset ได้เพราะเราจัดการที่ข้อ 0.
         sel_prod = st.selectbox("เลือกสินค้า", prod_list, index=None, key="bp_sel_prod")
         
         pid = ""
@@ -367,6 +380,7 @@ def po_batch_dialog():
         
         with col_input:
             r1c1, r1c2, r1c3 = st.columns(3)
+            # กำหนด value=... เพื่อให้เวลา Reset กลับมาเป็นค่านี้
             total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=100, key="bp_qty")
             cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, key="bp_cost_yuan")
             rate_money = r1c3.number_input("เรทเงิน (บาท/หยวน)", min_value=0.0, step=0.01, value=5.0, key="bp_rate")
@@ -386,7 +400,7 @@ def po_batch_dialog():
                 p_lazada = m2.number_input("Lazada", value=0, key="bp_shop_l")
                 p_tiktok = m3.number_input("TikTok", value=0, key="bp_shop_t")
 
-    # --- ส่วนที่ 3: การรับของ ---
+    # --- 3. การรับของ ---
     st.subheader("3. 📦 การรับสินค้า")
     recv_mode = st.radio("รูปแบบการรับของ:", ["✅ รับครบทีเดียว (แนะนำ)", "🚚 ทยอยรับ (Split / ของขาด)"], horizontal=True)
     
@@ -397,11 +411,9 @@ def po_batch_dialog():
         s_date = col_simple_date.date_input("วันที่ของเข้า", date.today())
         s_note = col_simple_note.text_input("หมายเหตุ", value="ได้รับครบ")
         split_rows_to_process = [{"วันที่ได้รับ": s_date, "จำนวนที่เข้า": total_qty, "หมายเหตุ": s_note}]
-        
     else:
         st.info("💡 กรุณาระบุยอดที่ได้รับจริง (เว้นวันที่ว่างไว้ = ยังไม่ได้รับ / รอส่ง)")
         default_data = [{"วันที่ได้รับ": date.today(), "จำนวนที่เข้า": 0, "หมายเหตุ": ""}]
-        
         df_split_input = pd.DataFrame(default_data)
         edited_split_df = st.data_editor(
             df_split_input,
@@ -414,8 +426,6 @@ def po_batch_dialog():
             use_container_width=True,
             hide_index=True
         )
-        
-        # Validation
         current_sum = edited_split_df["จำนวนที่เข้า"].sum()
         diff = total_qty - current_sum
         
@@ -425,79 +435,66 @@ def po_batch_dialog():
                 if row['จำนวนที่เข้า'] > 0:
                     d_val = row['วันที่ได้รับ']
                     if pd.isna(d_val) or str(d_val) == 'NaT': d_val = None
-                    split_rows_to_process.append({
-                        "วันที่ได้รับ": d_val,
-                        "จำนวนที่เข้า": row['จำนวนที่เข้า'],
-                        "หมายเหตุ": row['หมายเหตุ']
-                    })
+                    split_rows_to_process.append({"วันที่ได้รับ": d_val, "จำนวนที่เข้า": row['จำนวนที่เข้า'], "หมายเหตุ": row['หมายเหตุ']})
         else:
             if diff > 0: st.warning(f"⚠️ ยอดยังไม่ครบ: ขาดอีก {diff} ชิ้น")
             else: st.error(f"❌ ยอดเกิน: เกินมา {-diff} ชิ้น")
             split_rows_to_process = [] 
 
-    # --- ส่วนที่ 4: ปุ่มเพิ่มลงตระกร้า (ใช้ Callback เพื่อแก้ Error) ---
+    # --- 4. ปุ่มเพิ่มรายการ (Logic แบบ Flag) ---
     st.divider()
     btn_disabled = (not po_number) or (not sel_prod) or (len(split_rows_to_process) == 0)
 
-    # เตรียมค่าที่ต้องใช้คำนวณ (Pre-calculate) เพื่อส่งเข้า Callback
-    unit_yuan_calc = cost_yuan / total_qty if total_qty > 0 else 0
-    cbm_calc = cbm_val if is_cbm_per_piece else (cbm_val / total_qty if total_qty > 0 else 0)
+    if st.button("➕ เพิ่มรายการลงตระกร้า", type="primary", disabled=btn_disabled):
+        # คำนวณค่าต่างๆ
+        unit_yuan = cost_yuan / total_qty if total_qty > 0 else 0
+        cbm_per_piece = cbm_val if is_cbm_per_piece else (cbm_val / total_qty if total_qty > 0 else 0)
 
-    # 🔥 DEFINE CALLBACK FUNCTION
-    def add_to_cart_callback(rows, p_id, p_po, p_trans, p_ord, p_qty, p_rate, p_ship, p_w, p_u_yuan, p_cbm_unit, p_link, p_wc, p_s, p_l, p_t):
-        for row in rows:
+        for row in split_rows_to_process:
             q_split = row['จำนวนที่เข้า']
             d_recv = row['วันที่ได้รับ']
             note_split = row['หมายเหตุ']
-
-            recv_str = d_recv.strftime("%Y-%m-%d") if d_recv else ""
-            wait_days = (d_recv - p_ord).days if d_recv and p_ord else 0
             
-            split_cbm = p_cbm_unit * q_split
-            split_ship_cost = split_cbm * p_ship
-            split_yuan = p_u_yuan * q_split
-            split_thb = split_yuan * p_rate
+            recv_str = d_recv.strftime("%Y-%m-%d") if d_recv else ""
+            wait_days = (d_recv - order_date).days if d_recv and order_date else 0
+            
+            split_cbm = cbm_per_piece * q_split
+            split_ship_cost = split_cbm * ship_rate
+            split_yuan = unit_yuan * q_split
+            split_thb = split_yuan * rate_money
             unit_thb_final = (split_thb + split_ship_cost) / q_split if q_split > 0 else 0
 
             item = {
-                "SKU": p_id, "PO": p_po, "Trans": p_trans,
-                "Ord": str(p_ord), "Recv": recv_str, "Wait": wait_days,
+                "SKU": pid, "PO": po_number, "Trans": transport_type,
+                "Ord": str(order_date), "Recv": recv_str, "Wait": wait_days,
                 "Qty": int(q_split), "UnitTHB": round(unit_thb_final, 2),
                 "TotYuan": round(split_yuan, 2), "TotTHB": round(split_thb, 2), 
-                "Rate": p_rate, "ShipRate": p_ship,
+                "Rate": rate_money, "ShipRate": ship_rate,
                 "CBM": round(split_cbm, 4), "ShipCost": round(split_ship_cost, 2), 
-                "W": p_w, "UnitYuan": round(p_u_yuan, 4), 
-                "Shopee": p_s, "Laz": p_l, "Tik": p_t, 
-                "Note": note_split, "Link": p_link, "WeChat": p_wc
+                "W": weight_val, "UnitYuan": round(unit_yuan, 4), 
+                "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
+                "Note": note_split, "Link": link_shop, "WeChat": wechat
             }
             st.session_state.po_temp_cart.append(item)
 
-        st.toast(f"✅ เพิ่ม {p_id} เรียบร้อย!", icon="🛒")
+        st.toast(f"✅ เพิ่ม {pid} เรียบร้อย!", icon="🛒")
         
-        # ✅ RESET ค่าใน Callback (ทำได้ปลอดภัย ไม่ Error)
-        st.session_state["bp_sel_prod"] = None
-        st.session_state["bp_qty"] = 100
-        st.session_state["bp_cost_yuan"] = 0.0
-        st.session_state["bp_cbm"] = 0.0
-        st.session_state["bp_weight"] = 0.0
-        # ไม่ต้องสั่ง rerun() เพราะ Callback จะทำให้หน้าจอรีเฟรชใหม่อัตโนมัติ
+        # 🟢 เปิด Flag สั่งให้รอบหน้า Reset ค่า Input
+        st.session_state["need_reset_inputs"] = True
+        # สั่ง Rerun เพื่อให้กลับไปทำงานที่บรรทัดบนสุดใหม่ (และล้างค่าตาม Flag)
+        st.rerun()
 
-    # ปุ่มเรียกใช้งาน Callback
-    if st.button("➕ เพิ่มรายการลงตระกร้า", type="primary", disabled=btn_disabled,
-                 on_click=add_to_cart_callback,
-                 args=(split_rows_to_process, pid, po_number, transport_type, order_date, total_qty, rate_money, ship_rate, weight_val, unit_yuan_calc, cbm_calc, link_shop, wechat, p_shopee, p_lazada, p_tiktok)):
-        pass 
-
-    # --- Preview Cart ---
+    # --- 5. ตระกร้า ---
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
         st.dataframe(pd.DataFrame(st.session_state.po_temp_cart)[["SKU", "Qty", "Recv", "TotTHB", "Note"]], use_container_width=True, hide_index=True)
         
         c1, c2 = st.columns([1, 4])
-        if c1.button("🗑️ ล้าง"):
+        if c1.button("🗑️ ล้างตระกร้า"):
             st.session_state.po_temp_cart = []
             st.rerun()
+            
         if c2.button("💾 บันทึกทั้งหมด", type="primary"):
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
