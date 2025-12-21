@@ -368,13 +368,13 @@ def po_batch_dialog():
                 r1c1, r1c2, r1c3 = st.columns(3)
                 # ใช้ value=None และ placeholder ตามที่คุณต้องการ
                 qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=None, placeholder="กรอกจำนวน")
-                ex_rate = r1c2.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
-                cbm = r1c3.number_input("เรทเงินหยวน", value=None, format="%.4f", placeholder="0.0000")
+                ex_rate = r1c2.number_input("อัตราเรทเงิน (หยวน)", value=None, placeholder="0.00")
+                cbm = r1c3.number_input("ขนาด (คิว)", value=None, format="%.4f", placeholder="0.0000")
             
                 r2c1, r2c2, r2c3 = st.columns(3)
-                total_yuan = r2c1.number_input("รวมหยวน", value=None, placeholder="0.00")
+                total_yuan = r2c1.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
                 ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=None, placeholder="5000.0") 
-                weight = r2c3.number_input("ขนาด (คิว)", value=None, placeholder="0.00")
+                weight = r2c3.number_input("น้ำหนัก / KG.", value=None, placeholder="0.00")
             
                 with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
                     m1, m2, m3 = st.columns(3)
