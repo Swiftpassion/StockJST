@@ -175,32 +175,37 @@ def get_sale_from_folder():
         st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
 
-# --- ฟังก์ชันบันทึกแบบเดิม (สำหรับ Edit) ---
-def save_po_edit_update(row_index, data_list):
+# --- ฟังก์ชันบันทึกแบบ Split (Update แถวเดิม + Append แถวใหม่) ---
+def save_po_edit_split(row_index, current_row_data, new_row_data):
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # จัดรูปแบบข้อมูลให้สวยงามก่อนบันทึก
-        formatted_row = []
-        for item in data_list:
-            if isinstance(item, (date, datetime)): 
-                formatted_row.append(item.strftime("%Y-%m-%d"))
-            elif item is None: 
-                formatted_row.append("")
-            else: 
-                formatted_row.append(item)
-                
-        # Update ข้อมูลทั้งแถว (A ถึง V = 22 คอลัมน์)
+        # 1. Update แถวเดิม (A:V)
+        formatted_curr = []
+        for item in current_row_data:
+            if isinstance(item, (date, datetime)): formatted_curr.append(item.strftime("%Y-%m-%d"))
+            elif item is None: formatted_curr.append("")
+            else: formatted_curr.append(item)
+        
         range_name = f"A{row_index}:V{row_index}" 
-        ws.update(range_name, [formatted_row])
+        ws.update(range_name, [formatted_curr])
+        
+        # 2. Append แถวใหม่ (ยอดที่เหลือ)
+        formatted_new = []
+        for item in new_row_data:
+            if isinstance(item, (date, datetime)): formatted_new.append(item.strftime("%Y-%m-%d"))
+            elif item is None: formatted_new.append("")
+            else: formatted_new.append(item)
+            
+        ws.append_row(formatted_new)
         
         st.cache_data.clear() 
         return True
     except Exception as e:
-        st.error(f"❌ บันทึกแก้ไขไม่สำเร็จ: {e}")
+        st.error(f"❌ บันทึก Split ไม่สำเร็จ: {e}")
         return False
 
 # --- [NEW] ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
@@ -314,38 +319,37 @@ def show_history_dialog(fixed_product_id=None):
             else: st.warning("ยังไม่มีประวัติการสั่งซื้อ")
 
 # ==========================================
-# [NEW] ฟังก์ชันแก้ไข (แก้ไขรูปแบบการแสดงผล Search)
+# [NEW] ฟังก์ชันแก้ไข V2 (รองรับ Split Delivery / แบ่งรับ)
 # ==========================================
 @st.dialog("📝 แก้ไขรายละเอียด PO (Full Editor)", width="large")
 def po_edit_dialog_v2():
-    st.caption("🔍 ค้นหารายการ -> แก้ไขข้อมูลในฟอร์ม -> กดบันทึกทับ (Update)")
+    st.caption("🔍 ค้นหารายการ -> แก้ไขข้อมูล -> บันทึก (หรือเลือกแบ่งรับสินค้าหากของมาไม่ครบ)")
 
     # --- ส่วนที่ 1: ค้นหา ---
     selected_row = None
     row_index = None
     
     if not df_po.empty:
-        # สร้างตัวเลือกค้นหา
         po_map = {}
         for idx, row in df_po.iterrows():
-            # [FIXED] แสดงเป็น: เลข PO : รหัสสินค้า (วันที่สั่งซื้อ)
-            display_text = f"{row.get('PO_Number','-')} : {row.get('Product_ID','-')} ({row.get('Order_Date','-')})"
+            # แสดง: เลข PO : รหัสสินค้า (วันที่สั่งซื้อ) : จำนวน
+            display_text = f"{row.get('PO_Number','-')} : {row.get('Product_ID','-')} (สั่ง: {row.get('Order_Date','-')} | {row.get('Qty_Ordered',0)} ชิ้น)"
             po_map[display_text] = row
         
-        # Selectbox ค้นหา
         search_key = st.selectbox("🔍 ค้นหารายการที่ต้องการแก้ไข", options=list(po_map.keys()), index=None, placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
         
         if search_key:
             selected_row = po_map[search_key]
-            # ดึงเลขบรรทัดจริงจาก Sheet
             if 'Sheet_Row_Index' in selected_row:
                 row_index = int(selected_row['Sheet_Row_Index'])
 
     st.divider()
 
     if selected_row is not None and row_index is not None:
-        # --- เตรียมข้อมูลเดิม ---
         def get_val(col, default): return selected_row.get(col, default)
+        
+        # เก็บค่าเดิมไว้คำนวณส่วนต่าง
+        original_qty = int(get_val('Qty_Ordered', 1))
         
         try: d_ord = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
         except: d_ord = date.today()
@@ -354,8 +358,6 @@ def po_edit_dialog_v2():
         except: d_recv = None
 
         # --- ส่วนที่ 2: ฟอร์มแก้ไข ---
-        
-        # 2.1 Header
         with st.container(border=True):
             st.subheader("1. ข้อมูลเอกสาร (Header)")
             c1, c2, c3 = st.columns(3)
@@ -368,28 +370,24 @@ def po_edit_dialog_v2():
             
             e_ord_date = c3.date_input("วันที่สั่งซื้อ", value=d_ord, key="e_ord_date")
 
-        # 2.2 Product & Cost
         with st.container(border=True):
             st.subheader("2. รายละเอียดสินค้า & ต้นทุน")
-            
             col_img, col_info = st.columns([1, 3])
             with col_img:
                 img_link = get_val('Image', '')
-                if img_link and str(img_link).startswith('http'): 
-                    st.image(img_link, width=120)
-                else: 
-                    st.info("No Image")
+                if img_link and str(img_link).startswith('http'): st.image(img_link, width=120)
+                else: st.info("No Image")
             
             with col_info:
                 st.markdown(f"**รหัสสินค้า:** `{get_val('Product_ID','')}`")
                 st.markdown(f"**ชื่อสินค้า:** {get_val('Product_Name','')}")
-                st.markdown(f"**หมวดหมู่:** {get_val('Product_Type','')}")
 
             st.divider()
             
             # Inputs
             r1c1, r1c2, r1c3 = st.columns(3)
-            e_qty = r1c1.number_input("จำนวน (ชิ้น)", min_value=1, value=int(get_val('Qty_Ordered', 1)), key="e_qty")
+            # e_qty คือยอดที่จะ "บันทึกทับ" แถวเดิม (ถ้าแบ่งรับ ให้ใส่ยอดที่ได้รับจริงรอบนี้)
+            e_qty = r1c1.number_input("จำนวน (ชิ้น)", min_value=1, value=original_qty, key="e_qty")
             e_yuan = r1c2.number_input("ราคารวม (หยวน)", min_value=0.0, value=float(get_val('Total_Yuan', 0)), step=0.01, key="e_yuan")
             e_rate = r1c3.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, key="e_rate")
 
@@ -402,45 +400,81 @@ def po_edit_dialog_v2():
                 x1, x2 = st.columns(2)
                 e_link = x1.text_input("Link", value=get_val('Link', ''), key="e_link")
                 e_wechat = x2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
-                
                 m1, m2, m3 = st.columns(3)
                 e_s = m1.number_input("Shopee", value=float(get_val('Shopee_Price', 0)), key="e_s")
                 e_l = m2.number_input("Lazada", value=float(get_val('Lazada_Price', 0)), key="e_l")
                 e_t = m3.number_input("TikTok", value=float(get_val('TikTok_Price', 0)), key="e_t")
 
-        # 2.3 Delivery
         with st.container(border=True):
             st.subheader("3. สถานะการรับของ")
             col_d1, col_d2 = st.columns([1, 2])
             e_recv_date = col_d1.date_input("วันที่ได้รับ (เว้นว่าง = ยังไม่ได้รับ)", value=d_recv, key="e_recv_date")
             e_note = col_d2.text_input("หมายเหตุ", value=get_val('Note', ''), key="e_note")
 
+        # --- [NEW] Section แบ่งรับสินค้า ---
+        is_split = False
+        remaining_qty = 0
+        
+        # ถ้ายอดที่กรอก น้อยกว่า ยอดเดิม -> แสดงปุ่ม Split
+        if e_qty < original_qty:
+            st.warning(f"⚠️ ยอดที่กรอก ({e_qty}) น้อยกว่ายอดเดิม ({original_qty})")
+            is_split = st.checkbox(f"✂️ ต้องการแยกยอดที่เหลือ ({original_qty - e_qty} ชิ้น) ไปเป็นรายการใหม่ (รอส่ง) หรือไม่?", value=True)
+            if is_split:
+                remaining_qty = original_qty - e_qty
+                st.info(f"👉 ระบบจะทำการ:\n1. แก้ไขรายการนี้เป็น **{e_qty} ชิ้น** (ได้รับแล้ว)\n2. สร้างรายการใหม่ **{remaining_qty} ชิ้น** (สถานะ: รอของ/ยังไม่ระบุวันรับ)")
+
         # --- Calculation Preview ---
         calc_ship_cost = e_cbm * e_ship_rate
         calc_total_thb = (e_yuan * e_rate)
         calc_unit_cost = ((e_yuan * e_rate) + calc_ship_cost) / e_qty if e_qty > 0 else 0
         
-        st.info(f"💰 **สรุปยอดใหม่:** ค่าส่ง {calc_ship_cost:,.2f} บาท | รวม(บาท) {calc_total_thb:,.2f} | **ต้นทุนต่อชิ้น {calc_unit_cost:,.2f} บาท**")
+        st.markdown(f"💰 **สรุปต้นทุน (สำหรับ {e_qty} ชิ้น):** ต้นทุนต่อชิ้น `{calc_unit_cost:,.2f}` บาท")
 
         # --- ปุ่มบันทึก ---
-        if st.button("💾 บันทึกการแก้ไข (Save Changes)", type="primary"):
+        if st.button("💾 บันทึกข้อมูล", type="primary"):
+            # 1. Prepare Current Row Data
             recv_str = e_recv_date.strftime("%Y-%m-%d") if e_recv_date else ""
             wait_days = (e_recv_date - e_ord_date).days if e_recv_date else 0
-            
             final_unit_thb = calc_unit_cost
             final_total_thb = calc_total_thb
             final_unit_yuan = e_yuan / e_qty if e_qty > 0 else 0
 
-            data_to_save = [
-                get_val('Product_ID', ''), 
-                e_po, e_trans, e_ord_date, e_recv_date, wait_days, 
-                e_qty, final_unit_thb, e_yuan, final_total_thb, 
-                e_rate, e_ship_rate, e_cbm, calc_ship_cost, e_weight, 
-                final_unit_yuan, e_s, e_l, e_t, e_note, e_link, e_wechat
+            current_row_data = [
+                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, e_recv_date, wait_days, 
+                e_qty, final_unit_thb, e_yuan, final_total_thb, e_rate, e_ship_rate, 
+                e_cbm, calc_ship_cost, e_weight, final_unit_yuan, e_s, e_l, e_t, e_note, e_link, e_wechat
             ]
             
-            if save_po_edit_update(row_index, data_to_save):
-                st.success(f"✅ แก้ไขรายการ {e_po} เรียบร้อยแล้ว!")
+            success = False
+            
+            if is_split and remaining_qty > 0:
+                # 2. Prepare New Row Data (Remaining)
+                # คำนวณ Cost แบบ Pro-rate สำหรับส่วนที่เหลือ (สมมติว่าเป็นราคาเดิมต่อหน่วย)
+                # หมายเหตุ: CBM และ ราคารวมหยวน ต้องถูกหักออกไป หรือ หารเฉลี่ย?
+                # ในที่นี้สมมติว่า User แก้ CBM/Yuan ของก้อนแรกมาแล้ว -> ก้อนหลังต้องคำนวณใหม่
+                # เพื่อความง่าย: ใช้ Unit Cost เดิมคูณจำนวนที่เหลือ
+                
+                rem_yuan = final_unit_yuan * remaining_qty
+                rem_cbm = (e_cbm / e_qty) * remaining_qty if e_qty > 0 else 0
+                rem_ship_cost = rem_cbm * e_ship_rate
+                rem_total_thb = rem_yuan * e_rate
+                
+                new_row_data = [
+                    get_val('Product_ID', ''), e_po, e_trans, e_ord_date, None, 0, # None date for new row
+                    remaining_qty, final_unit_thb, round(rem_yuan, 2), round(rem_total_thb, 2), 
+                    e_rate, e_ship_rate, round(rem_cbm, 4), round(rem_ship_cost, 2), 0, # Weight อาจต้องแก้เอง
+                    final_unit_yuan, e_s, e_l, e_t, "ค้างส่ง (Split)", e_link, e_wechat
+                ]
+                
+                success = save_po_edit_split(row_index, current_row_data, new_row_data)
+                if success: st.success(f"✅ บันทึกแยกยอด: รับ {e_qty} / ค้าง {remaining_qty} เรียบร้อย!")
+            
+            else:
+                # บันทึกแบบ Update ปกติ
+                success = save_po_edit_update(row_index, current_row_data)
+                if success: st.success(f"✅ บันทึกแก้ไขรายการ {e_po} เรียบร้อย!")
+
+            if success:
                 st.session_state.active_dialog = None
                 time.sleep(1)
                 st.rerun()
