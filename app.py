@@ -319,30 +319,29 @@ def show_history_dialog(fixed_product_id=None):
             else: st.warning("ยังไม่มีประวัติการสั่งซื้อ")
 
 # ==========================================
-# [NEW] ฟังก์ชันแก้ไข V3 (รองรับการทยอยรับได้ไม่จำกัดรอบ)
+# [NEW] ฟังก์ชันแก้ไข V4 (ย้ายวันที่รับของมาไว้จุดเดียวกับจำนวน)
 # ==========================================
 @st.dialog("📝 บันทึกรับของ / แก้ไข PO", width="large")
 def po_edit_dialog_v2():
-    st.caption("📦 เลือกรายการที่ 'รอรับของ' -> กรอกจำนวนที่มาจริง -> ระบบจะแยกยอดที่เหลือไปรอรอบหน้าให้เอง")
+    st.caption("📦 เลือกรายการที่ 'รอรับของ' -> ระบุจำนวนและวันที่ -> บันทึก (ระบบจัดการยอดค้างให้เอง)")
 
-    # --- ส่วนที่ 1: ค้นหา (ปรับปรุงให้เห็นสถานะชัดเจน) ---
+    # --- ส่วนที่ 1: ค้นหา ---
     selected_row = None
     row_index = None
     
     if not df_po.empty:
         po_map = {}
         for idx, row in df_po.iterrows():
-            # เช็คสถานะคร่าวๆ
             qty = int(row.get('Qty_Ordered', 0))
             recv_date = row.get('Received_Date', '')
-            status_icon = "✅ ครบ" if recv_date else "⏳ รอของ"
+            # เช็คว่ามีวันที่รับหรือยัง
+            status_icon = "✅ ครบ" if (recv_date and str(recv_date).strip() != '') else "⏳ รอของ"
             
-            # แสดงผล: [สถานะ] เลข PO : สินค้า (เหลือ ... ชิ้น)
             display_text = f"[{status_icon}] {row.get('PO_Number','-')} : {row.get('Product_ID','-')} (จำนวน: {qty} ชิ้น)"
             po_map[display_text] = row
         
-        # เรียงลำดับให้ "รอของ" ขึ้นก่อน เพื่อให้หาง่าย
-        sorted_keys = sorted(po_map.keys(), key=lambda x: "✅" in x) # เอา ✅ ไว้หลัง
+        # เรียงให้ 'รอของ' ขึ้นก่อน
+        sorted_keys = sorted(po_map.keys(), key=lambda x: "✅" in x)
         
         search_key = st.selectbox("🔍 ค้นหารายการ", options=sorted_keys, index=None, placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
         
@@ -356,18 +355,19 @@ def po_edit_dialog_v2():
     if selected_row is not None and row_index is not None:
         def get_val(col, default): return selected_row.get(col, default)
         
-        # เก็บค่าเดิมไว้คำนวณส่วนต่าง
         original_qty = int(get_val('Qty_Ordered', 1))
         
-        # แปลงวันที่
+        # วันที่สั่งซื้อ
         try: d_ord = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
         except: d_ord = date.today()
         
-        # วันที่รับของ: ถ้ามีค่าเดิมให้โชว์ ถ้าไม่มี (รอของ) ให้ Default เป็นวันนี้เพื่อความสะดวก
+        # วันที่รับของ: ถ้ามีค่าเดิมให้โชว์ ถ้าไม่มี (รอของ) ให้ Default เป็นวันนี้
         try: 
             raw_recv = str(get_val('Received_Date', ''))
-            if raw_recv: d_recv = datetime.strptime(raw_recv, "%Y-%m-%d").date()
-            else: d_recv = date.today() # สะดวกในการกดรับของ
+            if raw_recv and raw_recv.lower() != 'nat' and raw_recv.strip() != '':
+                d_recv = datetime.strptime(raw_recv, "%Y-%m-%d").date()
+            else: 
+                d_recv = date.today()
         except: d_recv = date.today()
 
         # --- ส่วนที่ 2: ฟอร์มแก้ไข ---
@@ -398,92 +398,76 @@ def po_edit_dialog_v2():
 
             st.divider()
             
-            # --- ไฮไลท์: ส่วนรับของที่ปรับปรุงใหม่ ---
-            st.markdown("#### 📦 บันทึกจำนวนที่ได้รับ (รอบนี้)")
+            # --- [UPDATED] ย้ายวันที่รับของมาไว้ตรงนี้ ---
+            st.markdown("#### 📦 บันทึกการรับของ")
             
-            r1c1, r1c2 = st.columns([2, 3])
-            with r1c1:
-                e_qty_received = st.number_input("ได้รับจริง (ชิ้น)", min_value=1, max_value=original_qty, value=original_qty, key="e_qty")
+            # จัด Layout: จำนวน | วันที่ | หมายเหตุ
+            r_col1, r_col2, r_col3 = st.columns([1.5, 1.5, 2])
             
-            # คำนวณส่วนต่างทันที
-            remaining_qty = original_qty - e_qty_received
+            with r_col1:
+                e_qty_received = st.number_input("จำนวนที่รับ (ชิ้น)", min_value=1, max_value=original_qty, value=original_qty, key="e_qty")
             
-            with r1c2:
-                if remaining_qty > 0:
-                    st.warning(f"⚠️ ยอดเดิม {original_qty} -> รับจริง {e_qty_received}")
-                    st.info(f"👉 **เหลือค้างส่งอีก {remaining_qty} ชิ้น** (ระบบจะสร้างรายการใหม่ให้ไว้รับรอบหน้า)")
-                else:
-                    st.success(f"✅ ได้รับครบจำนวน ({original_qty} ชิ้น)")
+            with r_col2:
+                # เพิ่มช่องวันที่รับของตรงนี้
+                e_recv_date = st.date_input("วันที่ได้รับของ", value=d_recv, key="e_recv_date")
+
+            with r_col3:
+                # Auto Note
+                default_note = get_val('Note', '')
+                remaining_qty = original_qty - e_qty_received
+                if remaining_qty > 0 and not default_note:
+                    default_note = f"รับบางส่วน {e_qty_received} (ค้าง {remaining_qty})"
+                elif not default_note:
+                    default_note = "ได้รับครบ"
+                e_note = st.text_input("หมายเหตุ", value=default_note, key="e_note")
+            
+            # แจ้งเตือนยอดค้าง
+            if remaining_qty > 0:
+                st.warning(f"⚠️ ยอดเดิม {original_qty} -> รับจริง {e_qty_received} | **เหลือค้างส่งอีก {remaining_qty} ชิ้น** (ระบบจะสร้างรายการรอรับของให้อัตโนมัติ)")
+            else:
+                st.success(f"✅ รับครบจำนวน ({original_qty} ชิ้น)")
 
             st.divider()
             
-            # ข้อมูลราคา (โชว์และแก้ได้ถ้าจำเป็น)
+            # ส่วนแก้ไขต้นทุน (ซ่อนไว้ใน Expander)
             with st.expander("💰 แก้ไขต้นทุน / ราคา / ข้อมูลอื่นๆ (กดเพื่อเปิด)"):
                 r2c1, r2c2, r2c3 = st.columns(3)
                 e_yuan = r2c1.number_input("ราคารวม (หยวน)", min_value=0.0, value=float(get_val('Total_Yuan', 0)), step=0.01, key="e_yuan")
                 e_rate = r2c2.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, key="e_rate")
                 
-                # Logic: ถ้าแบ่งรับ ต้อง Pro-rate ค่าขนส่ง/CBM หรือไม่?
-                # เพื่อความง่าย เราจะให้ user แก้ค่า CBM/Weight ของ "ยอดที่ได้รับรอบนี้"
-                st.caption("👇 กรุณาระบุ CBM และ น้ำหนัก ของยอดที่ได้รับรอบนี้ (ระบบคำนวณค่าส่งจากยอดนี้)")
+                # CBM Logic
                 cbm_val = float(get_val('CBM', 0))
-                # ถ้าแบ่งรับ ให้ลองคำนวณ CBM เฉลี่ยให้ user ดู
+                # Suggest CBM ตามสัดส่วน
                 suggested_cbm = (cbm_val / original_qty) * e_qty_received if original_qty > 0 else cbm_val
                 
                 m1, m2 = st.columns(2)
-                e_cbm = m1.number_input("CBM (ของยอดรับจริง)", min_value=0.0, value=float(suggested_cbm), step=0.001, format="%.4f", key="e_cbm")
+                e_cbm = m1.number_input(f"CBM (ของยอด {e_qty_received} ชิ้น)", min_value=0.0, value=float(suggested_cbm), step=0.001, format="%.4f", key="e_cbm")
                 e_ship_rate = m2.number_input("เรทขนส่ง", min_value=0.0, value=float(get_val('Ship_Rate', 5000)), step=100.0, key="e_ship_rate")
-                
-                e_weight = st.number_input("น้ำหนัก KG (ของยอดรับจริง)", min_value=0.0, value=float(get_val('Transport_Weight', 0)), step=0.1, key="e_weight")
+                e_weight = st.number_input("น้ำหนัก KG", min_value=0.0, value=float(get_val('Transport_Weight', 0)), step=0.1, key="e_weight")
                 
                 x1, x2 = st.columns(2)
                 e_link = x1.text_input("Link", value=get_val('Link', ''), key="e_link")
                 e_wechat = x2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
 
-        # 2.3 Delivery Date
-        with st.container(border=True):
-            col_d1, col_d2 = st.columns([1, 2])
-            e_recv_date = col_d1.date_input("วันที่ได้รับของ (รอบนี้)", value=d_recv, key="e_recv_date")
-            
-            # Auto generate note
-            default_note = get_val('Note', '')
-            if remaining_qty > 0:
-                default_note = f"รับบางส่วน {e_qty_received} (ค้าง {remaining_qty})"
-            elif not default_note:
-                default_note = "ได้รับครบ"
-                
-            e_note = col_d2.text_input("หมายเหตุ", value=default_note, key="e_note")
-
-        # --- Calculation Preview ---
-        # คำนวณต้นทุนของ "ยอดที่ได้รับรอบนี้"
-        # 1. หายอดหยวนของรอบนี้ (Pro-rate)
-        # ถ้ายอดหยวนรวมมาเป็นก้อน เราต้องเทียบบัญญัติไตรยางศ์จากยอดเต็ม
+        # --- Calculation & Save ---
+        # 1. หายอดหยวนของรอบนี้
         total_yuan_original = float(get_val('Total_Yuan', 0))
-        this_round_yuan = (total_yuan_original / original_qty) * e_qty_received if original_qty > 0 else e_yuan
-        
-        # แต่ถ้า User แก้ e_yuan ในฟอร์ม แปลว่าเขาอาจจะใส่ยอดจริงมาแล้ว ให้ใช้ค่าที่ User แก้
-        # เช็คว่า user แก้ e_yuan หรือไม่? (ยากหน่อย เอาเป็นว่าใช้ e_yuan ที่กรอก ถ้า user ไม่แก้ก็คือยอดเต็ม)
-        # *ปรับปรุง Logic*: ถ้ามีการ Split ให้เตือน User เรื่องราคารวมหยวน
+        # ถ้า user ไม่ได้แก้ e_yuan ให้คำนวณ Pro-rate
         if remaining_qty > 0 and e_yuan == total_yuan_original:
-             st.caption(f"💡 ระบบคำนวณยอดหยวนรอบนี้ให้อัตโนมัติ: {this_round_yuan:,.2f} หยวน (จากยอดเต็ม {total_yuan_original})")
-             final_calc_yuan = this_round_yuan
+             final_calc_yuan = (total_yuan_original / original_qty) * e_qty_received if original_qty > 0 else 0
         else:
-             final_calc_yuan = e_yuan # ใช้ยอดที่ user กรอกเอง
+             final_calc_yuan = e_yuan
 
         calc_ship_cost = e_cbm * e_ship_rate
         calc_total_thb = (final_calc_yuan * e_rate)
         calc_unit_cost = ((final_calc_yuan * e_rate) + calc_ship_cost) / e_qty_received if e_qty_received > 0 else 0
         
         st.markdown(f"""
-        <div style="background-color: #1e2a3a; padding: 15px; border-radius: 8px; border-left: 5px solid #4CAF50;">
-            💰 <b>สรุปยอดรับของรอบนี้ ({e_qty_received} ชิ้น):</b><br>
-            - ค่าสินค้า: {final_calc_yuan:,.2f} หยวน<br>
-            - ค่าขนส่ง: {calc_ship_cost:,.2f} บาท<br>
-            - ต้นทุนต่อชิ้น: <b>{calc_unit_cost:,.2f} บาท</b>
+        <div style="background-color: #1e2a3a; padding: 10px; border-radius: 8px; border-left: 5px solid #4CAF50; margin-bottom: 10px;">
+            💰 <b>สรุปยอดรอบนี้:</b> ต้นทุนต่อชิ้น <b>{calc_unit_cost:,.2f} บาท</b> (รวมส่ง)
         </div>
         """, unsafe_allow_html=True)
 
-        # --- ปุ่มบันทึก ---
         if st.button("💾 บันทึกรับของ", type="primary"):
             recv_str = e_recv_date.strftime("%Y-%m-%d")
             wait_days = (e_recv_date - e_ord_date).days
@@ -492,7 +476,7 @@ def po_edit_dialog_v2():
             final_total_thb = calc_total_thb
             final_unit_yuan = final_calc_yuan / e_qty_received if e_qty_received > 0 else 0
 
-            # 1. Data สำหรับ "แถวปัจจุบัน" (กลายเป็นรายการที่รับของแล้ว)
+            # Data แถวปัจจุบัน (รับของ)
             current_row_data = [
                 get_val('Product_ID', ''), e_po, e_trans, e_ord_date, e_recv_date, wait_days, 
                 e_qty_received, final_unit_thb, round(final_calc_yuan,2), round(final_total_thb,2), 
@@ -504,12 +488,10 @@ def po_edit_dialog_v2():
             success = False
             
             if remaining_qty > 0:
-                # 2. Data สำหรับ "ยอดคงเหลือ" (สร้างแถวใหม่ รอรับรอบถัดไป)
-                # คำนวณส่วนที่เหลือ
-                rem_yuan = total_yuan_original - final_calc_yuan # หยวนที่เหลือ
+                # Data ยอดค้าง (สร้างใหม่)
+                rem_yuan = total_yuan_original - final_calc_yuan
                 if rem_yuan < 0: rem_yuan = 0
                 
-                # CBM ที่เหลือ (เอา CBM รวมเดิม - CBM รอบนี้)
                 original_cbm = float(get_val('CBM', 0))
                 rem_cbm = original_cbm - e_cbm
                 if rem_cbm < 0: rem_cbm = 0
@@ -517,7 +499,6 @@ def po_edit_dialog_v2():
                 rem_total_thb = rem_yuan * e_rate
                 rem_ship_cost = rem_cbm * e_ship_rate
                 
-                # วันที่รับว่างไว้, Wait=0
                 new_row_data = [
                     get_val('Product_ID', ''), e_po, e_trans, e_ord_date, None, 0, 
                     remaining_qty, final_unit_thb, round(rem_yuan, 2), round(rem_total_thb, 2), 
@@ -527,10 +508,9 @@ def po_edit_dialog_v2():
                 ]
                 
                 success = save_po_edit_split(row_index, current_row_data, new_row_data)
-                if success: st.success(f"✅ บันทึกรับของ {e_qty_received} ชิ้น และแยกยอดค้าง {remaining_qty} ชิ้น เรียบร้อย!")
+                if success: st.success(f"✅ บันทึกรับ {e_qty_received} / ค้าง {remaining_qty} เรียบร้อย!")
             
             else:
-                # รับครบ ไม่ต้องสร้างแถวใหม่
                 success = save_po_edit_update(row_index, current_row_data)
                 if success: st.success(f"✅ บันทึกรับครบ {e_qty_received} ชิ้น เรียบร้อย!")
 
