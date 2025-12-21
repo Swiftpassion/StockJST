@@ -176,28 +176,31 @@ def get_sale_from_folder():
         return pd.DataFrame()
 
 # --- ฟังก์ชันบันทึกแบบเดิม (สำหรับ Edit) ---
-def save_po_to_sheet(data_row, row_index=None):
+def save_po_edit_update(row_index, data_list):
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
+        # จัดรูปแบบข้อมูลให้สวยงามก่อนบันทึก
         formatted_row = []
-        for item in data_row:
-            if isinstance(item, (date, datetime)): formatted_row.append(item.strftime("%Y-%m-%d"))
-            elif item is None: formatted_row.append("")
-            else: formatted_row.append(item)
+        for item in data_list:
+            if isinstance(item, (date, datetime)): 
+                formatted_row.append(item.strftime("%Y-%m-%d"))
+            elif item is None: 
+                formatted_row.append("")
+            else: 
+                formatted_row.append(item)
                 
-        if row_index:
-            range_name = f"A{row_index}:Q{row_index}" 
-            ws.update(range_name, [formatted_row])
-        else:
-            ws.append_row(formatted_row)
+        # Update ข้อมูลทั้งแถว (A ถึง V = 22 คอลัมน์)
+        range_name = f"A{row_index}:V{row_index}" 
+        ws.update(range_name, [formatted_row])
+        
         st.cache_data.clear() 
         return True
     except Exception as e:
-        st.error(f"❌ บันทึกไม่สำเร็จ: {e}")
+        st.error(f"❌ บันทึกแก้ไขไม่สำเร็จ: {e}")
         return False
 
 # --- [NEW] ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
@@ -310,28 +313,173 @@ def show_history_dialog(fixed_product_id=None):
                 st.dataframe(history_df, use_container_width=True, hide_index=True)
             else: st.warning("ยังไม่มีประวัติการสั่งซื้อ")
 
-# --- Original Edit Dialog (สำหรับปุ่ม "ค้นหา & แก้ไข") ---
-@st.dialog("📝 จัดการรายการสั่งซื้อ (แก้ไข)", width="large")
-def po_form_dialog(mode="search"):
-    st.subheader("✏️ แก้ไขรายการ (แบบเดิม)")
-    d = {}
-    sheet_row_index = None
-    kp = "d_edit"
+# ==========================================
+# [NEW] ฟังก์ชันแก้ไข (UI เหมือนหน้า Add + แก้ได้ทุกช่อง)
+# ==========================================
+@st.dialog("📝 แก้ไขรายละเอียด PO (Full Editor)", width="large")
+def po_edit_dialog_v2():
+    st.caption("🔍 ค้นหารายการ -> แก้ไขข้อมูลในฟอร์ม -> กดบันทึกทับ (Update)")
+
+    # --- ส่วนที่ 1: ค้นหา (คงรูปแบบเดิมตามที่ต้องการ) ---
+    selected_row = None
+    row_index = None
     
     if not df_po.empty:
-        po_map = {f"{row['PO_Number']} ({row['Product_ID']})": row for _, row in df_po.iterrows()}
-        selected_key = st.selectbox("เลือกรายการ PO", options=list(po_map.keys()), index=None, key="edit_sel")
-        if selected_key:
-            d = po_map[selected_key].to_dict()
-            if 'Sheet_Row_Index' in d: sheet_row_index = int(d['Sheet_Row_Index'])
-    
-    if d:
-        c1, c2 = st.columns(2)
-        new_qty = c1.number_input("จำนวนสั่ง", value=int(d.get("Qty_Ordered", 0)))
-        new_note = c2.text_input("หมายเหตุ", value=str(d.get("Note", "")))
+        # สร้างตัวเลือกค้นหา: "เลขPO - ชื่อสินค้า (วันที่)"
+        po_map = {}
+        for idx, row in df_po.iterrows():
+            # สร้าง Key สำหรับ Search
+            display_text = f"{row.get('PO_Number','-')} : {row.get('Product_Name','Unknown')} ({row.get('Order_Date','-')})"
+            po_map[display_text] = row
         
-        if st.button("💾 บันทึกทับ"):
-            st.warning("ฟังก์ชันแก้ไขแบบเดิม (Demo: ยังไม่เชื่อมต่อ Save ใหม่ เนื่องจากโครงสร้างเปลี่ยน)")
+        # Selectbox ค้นหา
+        search_key = st.selectbox("🔍 ค้นหารายการที่ต้องการแก้ไข", options=list(po_map.keys()), index=None, placeholder="พิมพ์เลข PO หรือ ชื่อสินค้า...")
+        
+        if search_key:
+            selected_row = po_map[search_key]
+            # ดึงเลขบรรทัดจริงจาก Sheet (ที่เก็บไว้ตอนโหลดข้อมูล)
+            if 'Sheet_Row_Index' in selected_row:
+                row_index = int(selected_row['Sheet_Row_Index'])
+
+    st.divider()
+
+    if selected_row is not None and row_index is not None:
+        # --- แปลงค่าเดิมเตรียมใส่ใน Input ---
+        def get_val(col, default): return selected_row.get(col, default)
+        
+        # วันที่
+        try: d_ord = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
+        except: d_ord = date.today()
+        
+        try: d_recv = datetime.strptime(str(get_val('Received_Date', '')), "%Y-%m-%d").date()
+        except: d_recv = None
+
+        # --- ส่วนที่ 2: ฟอร์มแก้ไข (Layout เดียวกับหน้า Add) ---
+        
+        # 2.1 Header
+        with st.container(border=True):
+            st.subheader("1. ข้อมูลเอกสาร (Header)")
+            c1, c2, c3 = st.columns(3)
+            e_po = c1.text_input("เลข PO", value=get_val('PO_Number', ''), key="e_po")
+            
+            # หา Index ของขนส่งเดิม
+            trans_opts = ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"]
+            curr_trans = get_val('Transport_Type', 'ทางรถ🚚')
+            t_idx = trans_opts.index(curr_trans) if curr_trans in trans_opts else 0
+            e_trans = c2.selectbox("การขนส่ง", trans_opts, index=t_idx, key="e_trans")
+            
+            e_ord_date = c3.date_input("วันที่สั่งซื้อ", value=d_ord, key="e_ord_date")
+
+        # 2.2 Product & Cost
+        with st.container(border=True):
+            st.subheader("2. รายละเอียดสินค้า & ต้นทุน")
+            
+            # แสดงรูปและชื่อ (แก้ไขชื่อไม่ได้ เพราะควรแก้ที่ Master แต่โชว์ให้เห็นชัดๆ)
+            col_img, col_info = st.columns([1, 3])
+            with col_img:
+                img_link = get_val('Image', '')
+                if img_link and str(img_link).startswith('http'): 
+                    st.image(img_link, width=120)
+                else: 
+                    st.info("No Image")
+            
+            with col_info:
+                st.markdown(f"**รหัสสินค้า:** `{get_val('Product_ID','')}`")
+                st.markdown(f"**ชื่อสินค้า:** {get_val('Product_Name','')}")
+                st.markdown(f"**หมวดหมู่:** {get_val('Product_Type','')}")
+
+            st.divider()
+            
+            # Inputs ต้นทุน (แก้ไขได้หมด)
+            r1c1, r1c2, r1c3 = st.columns(3)
+            e_qty = r1c1.number_input("จำนวน (ชิ้น)", min_value=1, value=int(get_val('Qty_Ordered', 1)), key="e_qty")
+            e_yuan = r1c2.number_input("ราคารวม (หยวน)", min_value=0.0, value=float(get_val('Total_Yuan', 0)), step=0.01, key="e_yuan")
+            e_rate = r1c3.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, key="e_rate")
+
+            r2c1, r2c2, r2c3 = st.columns(3)
+            e_cbm = r2c1.number_input("CBM รวม", min_value=0.0, value=float(get_val('CBM', 0)), step=0.001, format="%.4f", key="e_cbm")
+            e_ship_rate = r2c2.number_input("เรทขนส่ง (บาท/Q)", min_value=0.0, value=float(get_val('Ship_Rate', 5000)), step=100.0, key="e_ship_rate")
+            e_weight = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, value=float(get_val('Transport_Weight', 0)), step=0.1, key="e_weight")
+
+            # Extra Info
+            with st.expander("ข้อมูลเพิ่มเติม (Link / ราคาตลาด)"):
+                x1, x2 = st.columns(2)
+                e_link = x1.text_input("Link", value=get_val('Link', ''), key="e_link")
+                e_wechat = x2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
+                
+                m1, m2, m3 = st.columns(3)
+                e_s = m1.number_input("Shopee", value=float(get_val('Shopee_Price', 0)), key="e_s")
+                e_l = m2.number_input("Lazada", value=float(get_val('Lazada_Price', 0)), key="e_l")
+                e_t = m3.number_input("TikTok", value=float(get_val('TikTok_Price', 0)), key="e_t")
+
+        # 2.3 Delivery (แบบ Row เดียว - เพราะเป็นการแก้ไขรายการนี้รายการเดียว)
+        with st.container(border=True):
+            st.subheader("3. สถานะการรับของ")
+            col_d1, col_d2 = st.columns([1, 2])
+            e_recv_date = col_d1.date_input("วันที่ได้รับ (เว้นว่าง = ยังไม่ได้รับ)", value=d_recv, key="e_recv_date")
+            e_note = col_d2.text_input("หมายเหตุ", value=get_val('Note', ''), key="e_note")
+
+        # --- Calculation Preview ---
+        # คำนวณค่าใหม่แบบ Real-time เพื่อโชว์ก่อนบันทึก
+        calc_ship_cost = e_cbm * e_ship_rate
+        calc_total_thb = (e_yuan * e_rate) # เฉพาะค่าของ (ไม่รวมส่ง ตามสูตรเดิม) หรือถ้ารวมส่งต้องบวกเพิ่ม
+        # *หมายเหตุ: ในระบบเดิมของคุณ Total_THB คือค่าของอย่างเดียว หรือ รวมส่ง? 
+        # ปกติ Total_THB = (Total_Yuan * Rate)
+        # ต้นทุนต่อชิ้น = (Total_THB + Ship_Cost) / Qty
+        
+        calc_unit_cost = ((e_yuan * e_rate) + calc_ship_cost) / e_qty if e_qty > 0 else 0
+        
+        st.info(f"💰 **สรุปยอดใหม่:** ค่าส่ง {calc_ship_cost:,.2f} บาท | รวม(บาท) {calc_total_thb:,.2f} | **ต้นทุนต่อชิ้น {calc_unit_cost:,.2f} บาท**")
+
+        # --- ปุ่มบันทึก ---
+        if st.button("💾 บันทึกการแก้ไข (Save Changes)", type="primary"):
+            # เตรียมข้อมูล 22 คอลัมน์ ตามลำดับ Google Sheet
+            # ['Product_ID', 'PO_Number', 'Transport_Type', 'Order_Date', 'Received_Date', 'Wait_Days', 
+            #  'Qty_Ordered', 'Price_Unit_NoVAT', 'Total_Yuan', 'Total_THB', 'Yuan_Rate', 'Ship_Rate', 
+            #  'CBM', 'Ship_Cost', 'Transport_Weight', 'Price_Unit_Yuan', 'Shopee', 'Lazada', 'TikTok', 
+            #  'Note', 'Link', 'WeChat']
+            
+            # Logic วันที่
+            recv_str = e_recv_date.strftime("%Y-%m-%d") if e_recv_date else ""
+            wait_days = (e_recv_date - e_ord_date).days if e_recv_date else 0
+            
+            # Logic ราคา
+            # Price_Unit_NoVAT (บาท) = ต้นทุนต่อชิ้นรวมส่ง
+            final_unit_thb = calc_unit_cost
+            final_total_thb = calc_total_thb
+            final_unit_yuan = e_yuan / e_qty if e_qty > 0 else 0
+
+            data_to_save = [
+                get_val('Product_ID', ''), # 1. Product ID (ไม่แก้)
+                e_po,                      # 2. PO
+                e_trans,                   # 3. Trans
+                e_ord_date,                # 4. Order Date
+                e_recv_date,               # 5. Recv Date
+                wait_days,                 # 6. Wait
+                e_qty,                     # 7. Qty
+                final_unit_thb,            # 8. Unit THB (Cost)
+                e_yuan,                    # 9. Total Yuan
+                final_total_thb,           # 10. Total THB
+                e_rate,                    # 11. Rate
+                e_ship_rate,               # 12. Ship Rate
+                e_cbm,                     # 13. CBM
+                calc_ship_cost,            # 14. Ship Cost
+                e_weight,                  # 15. Weight
+                final_unit_yuan,           # 16. Unit Yuan
+                e_s, e_l, e_t,             # 17-19. Market Price
+                e_note,                    # 20. Note
+                e_link,                    # 21. Link
+                e_wechat                   # 22. WeChat
+            ]
+            
+            if save_po_edit_update(row_index, data_to_save):
+                st.success(f"✅ แก้ไขรายการ {e_po} เรียบร้อยแล้ว!")
+                st.session_state.active_dialog = None # ปิดหน้าต่าง
+                time.sleep(1)
+                st.rerun()
+                
+    else:
+        st.info("👈 กรุณาเลือกรายการที่ต้องการแก้ไขจากด้านบน")
 
 # ==========================================
 # [NEW] ฟังก์ชันบันทึกแบบ Batch (Fix หน้าขาว + Reset ค่าเสถียร)
@@ -863,13 +1011,12 @@ with tab3:
     else: st.warning("ไม่พบข้อมูล Master Product")
 
 # ==========================================
-# 🛑 EXECUTE DIALOGS (แก้ไขใหม่)
+# 🛑 EXECUTE DIALOGS
 # ==========================================
 if st.session_state.active_dialog == "po_batch":
     po_batch_dialog()
 elif st.session_state.active_dialog == "po_search":
-    po_form_dialog(mode="search")
+    # เปลี่ยนมาใช้ตัวใหม่ v2
+    po_edit_dialog_v2() 
 elif st.session_state.active_dialog == "history" and dialog_data:
-    # กรณี History อาจต้องปรับ logic เพิ่มเล็กน้อยถ้าใช้ session แบบเดียวกัน
-    # แต่สำหรับ PO Batch ใช้ logic ด้านบนนี้แก้ปัญหาได้เลยครับ
     show_history_dialog(fixed_product_id=dialog_data)
