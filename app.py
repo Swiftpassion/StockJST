@@ -329,127 +329,198 @@ def po_form_dialog(mode="search"):
         if st.button("💾 บันทึกทับ"):
             st.warning("ฟังก์ชันแก้ไขแบบเดิม (Demo: ยังไม่เชื่อมต่อ Save ใหม่ เนื่องจากโครงสร้างเปลี่ยน)")
 
-# --- [NEW] Batch Entry Dialog (สำหรับปุ่ม "เพิ่ม PO") ---
-@st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
+# ==========================================
+# [NEW] ฟังก์ชันบันทึกแบบ Batch + รองรับ Split Delivery
+# ==========================================
+@st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Advanced PO)", width="large")
 def po_batch_dialog():
-    st.caption("💡 เพิ่มรายการสินค้าลงตระกร้า แล้วบันทึกทีเดียว (รองรับ 22 คอลัมน์)")
+    st.caption("💡 รองรับการรับของหลายรอบ (Split Delivery) : กรอกยอดรวม -> แตกยอดรับ -> บันทึก")
 
-    # 1. Header
+    # --- ส่วนที่ 1: Header (ใช้ร่วมกันทุกรายการในรอบนี้) ---
     with st.container(border=True):
-        st.subheader("1. ข้อมูลสินค้า")
-        c1, c2, c3, c4 = st.columns(4)
+        st.subheader("1. ข้อมูลหลัก (Header)")
+        c1, c2, c3 = st.columns(3)
         po_number = c1.text_input("เลข PO", placeholder="PO-XXXX")
         transport_type = c2.selectbox("การขนส่ง", ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"])
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today())
-        received_date = c4.date_input("วันที่ได้รับ", date.today())
 
-    # 2. Item
+    # --- ส่วนที่ 2: เลือกสินค้า & ราคา (Master Data) ---
     with st.container(border=True):
-        st.subheader("2. เพิ่มสินค้า")
+        st.subheader("2. ข้อมูลสินค้า & ต้นทุน")
         prod_list = []
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
         sel_prod = st.selectbox("เลือกสินค้า", prod_list, index=None)
         
-        col_img, col_in = st.columns([1, 3])
+        # ดึงรูปภาพมาโชว์
+        pid = ""
+        img_url = ""
+        if sel_prod:
+            pid = sel_prod.split(" : ")[0]
+            item_data = df_master[df_master['Product_ID'] == pid]
+            if not item_data.empty:
+                img_url = item_data.iloc[0].get('Image', '')
+
+        col_img, col_cost = st.columns([1, 3])
         with col_img:
-            pid = ""
-            if sel_prod:
-                pid = sel_prod.split(" : ")[0]
-                item_data = df_master[df_master['Product_ID'] == pid]
-                if not item_data.empty:
-                    img = item_data.iloc[0].get('Image', '')
-                    if img: st.image(img, width=150)
+            if img_url: st.image(img_url, width=120)
+            else: st.write("No Image")
         
-        with col_in:
-            # 1. ใช้ st.form เพื่อให้เคลียร์ค่าได้ (clear_on_submit=True)
-            with st.form("add_item_form", clear_on_submit=True):
-                r1c1, r1c2, r1c3 = st.columns(3)
-                # ใช้ value=None และ placeholder ตามที่คุณต้องการ
-                qty = r1c1.number_input("จำนวนสินค้าที่สั่งซื้อ", min_value=1, value=None, placeholder="กรอกจำนวน")
-                ex_rate = r1c2.number_input("อัตราเรทเงิน (หยวน)", value=None, placeholder="0.00")
-                cbm = r1c3.number_input("ขนาด (คิว)", value=None, format="%.4f", placeholder="0.0000")
-            
-                r2c1, r2c2, r2c3 = st.columns(3)
-                total_yuan = r2c1.number_input("ราคาสินค้า (หยวน)", value=None, placeholder="0.00")
-                ship_rate = r2c2.number_input("เรทค่าขนส่ง", value=None, placeholder="5000.0") 
-                weight = r2c3.number_input("น้ำหนัก / KG.", value=None, placeholder="0.00")
-            
-                with st.expander("กรุณากรอกข้อมูลเพิ่มเติมเกี่ยวกับราคาตลาดและช่องทางการซื้อ"):
-                    m1, m2, m3 = st.columns(3)
-                    p_shopee = m1.number_input("Shopee", value=None, placeholder="0")
-                    p_lazada = m2.number_input("Lazada", value=None, placeholder="0")
-                    p_tiktok = m3.number_input("TikTok", value=None, placeholder="0")
-                    
-                    l1, l2 = st.columns(2)
-                    shop_link = l1.text_input("Link")
-                    wechat_id = l2.text_input("WeChat")
-                    note = st.text_area("หมายเหตุ")
+        with col_cost:
+            r1c1, r1c2, r1c3 = st.columns(3)
+            total_qty_ordered = r1c1.number_input("จำนวนที่สั่ง 'ทั้งหมด' (ชิ้น)", min_value=1, value=100)
+            total_yuan_cost = r1c2.number_input("ราคาสินค้า (หยวน)", min_value=0.0, value=0.0, help="ราคาต้นทุนสินค้าหน่วยหยวน")
+            ex_rate = r1c3.number_input("เรทเงิน (บาท/หยวน)", min_value=0.0, value=5.0)
 
-                # 2. ปุ่ม Submit ของ Form
-                submitted = st.form_submit_button("➕ เพิ่มลงตระกร้า", type="primary")
+            r2c1, r2c2, r2c3 = st.columns(3)
+            cbm_unit = r2c1.number_input("CBM (ต่อชิ้น หรือ รวม)", value=0.0, format="%.4f")
+            ship_rate = r2c2.number_input("เรทขนส่ง (บาท/Q)", value=5000.0)
+            weight = r2c3.number_input("น้ำหนัก (KG)", value=0.0)
 
-        # 3. Logic การบันทึก (อยู่นอก form แต่เช็คตัวแปร submitted)
-        if submitted:
-            # แปลงค่า None ให้เป็น 0 หรือค่า Default ก่อนคำนวณ เพื่อป้องกัน Error
-            c_qty = qty if qty is not None else 0
-            c_ex_rate = ex_rate if ex_rate is not None else 0.0
-            c_cbm = cbm if cbm is not None else 0.0
-            c_total_yuan = total_yuan if total_yuan is not None else 0.0
-            c_ship_rate = ship_rate if ship_rate is not None else 0.0
-            c_weight = weight if weight is not None else 0.0
-
-            if po_number and sel_prod and c_qty > 0:
-                # Calculation
-                wait_days = (received_date - order_date).days if received_date and order_date else 0
-                ship_cost = c_ship_rate * c_cbm
-                total_thb = c_total_yuan * c_ex_rate
+            # Extra Info
+            with st.expander("ข้อมูลเพิ่มเติม (Link/ราคาตลาด)"):
+                l1, l2 = st.columns(2)
+                shop_link = l1.text_input("Link สินค้า")
+                wechat_id = l2.text_input("WeChat ID")
                 
-                # ป้องกันการหารด้วย 0
-                unit_thb = (total_thb + ship_cost) / c_qty if c_qty > 0 else 0
-                unit_yuan = c_total_yuan / c_qty if c_qty > 0 else 0
-                
-                item = {
-                    "SKU": pid, "PO": po_number, "Trans": transport_type,
-                    "Ord": str(order_date), "Recv": str(received_date), "Wait": wait_days,
-                    "Qty": c_qty, "UnitTHB": round(unit_thb, 2), "TotYuan": c_total_yuan,
-                    "TotTHB": round(total_thb, 2), "Rate": c_ex_rate, "ShipRate": c_ship_rate,
-                    "CBM": c_cbm, "ShipCost": round(ship_cost, 2), "W": c_weight,
-                    "UnitYuan": round(unit_yuan, 4), "Shopee": p_shopee, "Laz": p_lazada,
-                    "Tik": p_tiktok, "Note": note, "Link": shop_link, "WeChat": wechat_id
-                }
-                st.session_state.po_temp_cart.append(item)
-                st.success(f"เพิ่ม {pid} แล้ว (ล้างค่าเรียบร้อย)")
-            else:
-                st.error("กรุณากรอกข้อมูล เลข PO, เลือกสินค้า และระบุจำนวนให้ครบถ้วน")
+                m1, m2, m3 = st.columns(3)
+                p_shopee = m1.number_input("ราคา Shopee", value=0)
+                p_lazada = m2.number_input("ราคา Lazada", value=0)
+                p_tiktok = m3.number_input("ราคา TikTok", value=0)
 
-    # 3. Preview & Save
+    # --- ส่วนที่ 3: จัดการการจัดส่ง (Split Delivery Logic) ---
+    st.subheader("3. 📦 การรับสินค้า (Split Delivery)")
+    
+    # สร้าง DataFrame เริ่มต้นสำหรับตารางแตกยอด
+    # Default: 1 แถว คือรับครบเลย
+    default_split_data = [
+        {"วันที่ได้รับ": date.today(), "จำนวนที่เข้า": total_qty_ordered, "หมายเหตุ": "ได้รับครบ"}
+    ]
+    
+    # ใช้ Data Editor ให้ user เพิ่ม/ลด แถวได้เองตามต้องการ
+    st.info("👇 แก้ไขตารางด้านล่างเพื่อแบ่งรอบส่ง (ถ้ามีรอบเดียวไม่ต้องแก้) | หากยังไม่ได้รับ ให้เว้นวันที่ว่างไว้")
+    df_split_input = pd.DataFrame(default_split_data)
+    
+    edited_split_df = st.data_editor(
+        df_split_input,
+        column_config={
+            "วันที่ได้รับ": st.column_config.DateColumn("วันที่ของเข้า (เว้นว่าง = รอของ)", required=False),
+            "จำนวนที่เข้า": st.column_config.NumberColumn("จำนวน (ชิ้น)", min_value=1, required=True),
+            "หมายเหตุ": st.column_config.TextColumn("สถานะ / หมายเหตุ", width="large")
+        },
+        num_rows="dynamic", # อนุญาตให้กด Add Row ได้
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # คำนวณยอดรวมในตารางเพื่อ Validation
+    sum_split_qty = edited_split_df["จำนวนที่เข้า"].sum()
+    diff = total_qty_ordered - sum_split_qty
+    
+    if diff == 0:
+        st.success(f"✅ ยอดครบถ้วน ({sum_split_qty}/{total_qty_ordered})")
+    elif diff > 0:
+        st.warning(f"⚠️ ยอดยังไม่ครบ ขาดอีก {diff} ชิ้น (กรุณาเพิ่มแถว)")
+    else:
+        st.error(f"❌ ยอดเกิน! เกินมา {-diff} ชิ้น (กรุณาลดจำนวน)")
+
+    # --- ปุ่ม Confirm ---
+    st.divider()
+    if st.button("➕ ยืนยันเพิ่มรายการลงตระกร้า", type="primary", disabled=(diff < 0 or not po_number or not sel_prod)):
+        
+        # คำนวณต้นทุนต่อหน่วย (เฉลี่ย)
+        # Unit Yuan = Total Yuan / Total Qty Ordered
+        unit_yuan = total_yuan_cost / total_qty_ordered if total_qty_ordered > 0 else 0
+        
+        for index, row in edited_split_df.iterrows():
+            qty_split = row['จำนวนที่เข้า']
+            recv_date = row['วันที่ได้รับ']
+            note_split = row['หมายเหตุ']
+            
+            # แปลงวันที่
+            recv_date_str = recv_date.strftime("%Y-%m-%d") if pd.notna(recv_date) else ""
+            wait_days = 0
+            if pd.notna(recv_date) and order_date:
+                wait_days = (recv_date - order_date).days
+
+            # คำนวณ Cost ของแต่ละ Split (Pro-rate ตามจำนวน)
+            # ถ้า CBM ที่กรอกมาเป็นยอดรวม -> ต้องหารเฉลี่ย
+            # ถ้า CBM ที่กรอกมาเป็นต่อชิ้น -> คูณจำนวน
+            # (สมมติว่าเป็นยอดรวม CBM ของทั้ง Lot ใหญ่ -> ต้องหารกลับมาเป็นต่อชิ้นก่อน)
+            # หรือเพื่อความง่าย: ระบบนี้มักใช้ CBM รวมในการคิดค่าส่ง
+            # สูตร: ค่าส่งของ Split นี้ = (CBM รวม / Total Qty) * Qty Split * Ship Rate
+            
+            cbm_per_piece = cbm_unit / total_qty_ordered if total_qty_ordered > 0 else 0 
+            # *หมายเหตุ: ถ้าหน้างานกรอก CBM ต่อชิ้นมา ให้แก้บรรทัดบนเป็น cbm_per_piece = cbm_unit
+            
+            this_split_cbm = cbm_per_piece * qty_split
+            this_split_ship_cost = this_split_cbm * ship_rate
+            
+            this_split_total_yuan = unit_yuan * qty_split
+            this_split_total_thb = this_split_total_yuan * ex_rate
+            
+            unit_thb = (this_split_total_thb + this_split_total_ship_cost) / qty_split if qty_split > 0 else 0 # (สูตรคร่าวๆ)
+            
+            # เตรียม Object ลง Cart
+            item = {
+                "SKU": pid, 
+                "PO": po_number, 
+                "Trans": transport_type,
+                "Ord": str(order_date), 
+                "Recv": recv_date_str, 
+                "Wait": wait_days,
+                "Qty": int(qty_split),  # จำนวนของ Split นี้
+                "UnitTHB": 0, # คำนวณละเอียดทีหลังได้ หรือใส่สูตร
+                "TotYuan": round(this_split_total_yuan, 2),
+                "TotTHB": round(this_split_total_thb, 2), 
+                "Rate": ex_rate, 
+                "ShipRate": ship_rate,
+                "CBM": round(this_split_cbm, 4), 
+                "ShipCost": round(this_split_ship_cost, 2), 
+                "W": weight, # อาจจะต้องหารเฉลี่ยเหมือน CBM ถ้าจำเป็น
+                "UnitYuan": round(unit_yuan, 4), 
+                "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
+                "Note": note_split, # ใช้ Note ของแต่ละ Split
+                "Link": shop_link, "WeChat": wechat_id
+            }
+            st.session_state.po_temp_cart.append(item)
+            
+        st.success(f"✅ เพิ่ม {pid} จำนวน {len(edited_split_df)} รายการย่อยเรียบร้อยแล้ว!")
+        time.sleep(1) # หน่วงเวลาให้เห็นข้อความ
+        st.rerun()
+
+    # --- ส่วน Preview Cart (เหมือนเดิม) ---
     if st.session_state.po_temp_cart:
         st.divider()
-        st.write(pd.DataFrame(st.session_state.po_temp_cart))
-        c_clear, c_save = st.columns([1, 4])
-        with c_clear:
-            if st.button("ล้าง"):
+        st.write(f"🛒 ในตระกร้ามี {len(st.session_state.po_temp_cart)} รายการ")
+        st.dataframe(pd.DataFrame(st.session_state.po_temp_cart))
+        
+        col_clr, col_sv = st.columns([1, 4])
+        if col_clr.button("ล้างตระกร้า"):
+            st.session_state.po_temp_cart = []
+            st.rerun()
+            
+        if col_sv.button("💾 บันทึกทั้งหมดลง Database"):
+            rows = []
+            for i in st.session_state.po_temp_cart:
+                 # Map 22 Columns (เรียงตามลำดับ Google Sheet)
+                 # 'รหัสสินค้า', 'เลข PO', 'ขนส่ง', 'วันที่สั่งซื้อ', 'วันที่ได้รับ', 'รอ (วัน)',
+                 # 'จำนวน', 'ราคา/ชิ้น', 'ราคา (หยวน)', 'ราคา (บาท)', 'เรทเงิน', 'เรทค่าขนส่ง', 
+                 # 'ขนาด (คิว)', 'ค่าส่ง', 'น้ำหนัก / KG', 'ราคา/ชิ้น (หยวน)', 'SHOPEE', 'LAZADA', 'TIKTOK',
+                 # 'หมายเหตุ', 'Link_Shop', 'WeChat'
+                row = [
+                    i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"],
+                    i["Qty"], 0, i["TotYuan"], i["TotTHB"],
+                    i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"],
+                    i["UnitYuan"], i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"]
+                ]
+                rows.append(row)
+            
+            if save_po_batch_to_sheet(rows):
+                st.success("บันทึกข้อมูลเรียบร้อย!")
                 st.session_state.po_temp_cart = []
                 st.rerun()
-        with c_save:
-            if st.button("💾 บันทึกทั้งหมด"):
-                rows = []
-                for i in st.session_state.po_temp_cart:
-                    # Map to 22 Columns
-                    row = [
-                        i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"],
-                        i["Qty"], i["UnitTHB"], i["TotYuan"], i["TotTHB"],
-                        i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"],
-                        i["UnitYuan"], i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"]
-                    ]
-                    rows.append(row)
-                
-                if save_po_batch_to_sheet(rows):
-                    st.success("บันทึกสำเร็จ!")
-                    st.session_state.po_temp_cart = []
-                    st.rerun()
 
 # ==========================================
 # 6. TABS & UI LOGIC
