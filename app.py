@@ -330,7 +330,7 @@ def po_form_dialog(mode="search"):
             st.warning("ฟังก์ชันแก้ไขแบบเดิม (Demo: ยังไม่เชื่อมต่อ Save ใหม่ เนื่องจากโครงสร้างเปลี่ยน)")
 
 # ==========================================
-# [NEW] ฟังก์ชันบันทึกแบบ Batch + รองรับ Split Delivery
+# [NEW] ฟังก์ชันบันทึกแบบ Batch + รองรับ Split Delivery (แก้ไขแล้ว)
 # ==========================================
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Advanced PO)", width="large")
 def po_batch_dialog():
@@ -393,12 +393,10 @@ def po_batch_dialog():
     st.subheader("3. 📦 การรับสินค้า (Split Delivery)")
     
     # สร้าง DataFrame เริ่มต้นสำหรับตารางแตกยอด
-    # Default: 1 แถว คือรับครบเลย
     default_split_data = [
         {"วันที่ได้รับ": date.today(), "จำนวนที่เข้า": total_qty_ordered, "หมายเหตุ": "ได้รับครบ"}
     ]
     
-    # ใช้ Data Editor ให้ user เพิ่ม/ลด แถวได้เองตามต้องการ
     st.info("👇 แก้ไขตารางด้านล่างเพื่อแบ่งรอบส่ง (ถ้ามีรอบเดียวไม่ต้องแก้) | หากยังไม่ได้รับ ให้เว้นวันที่ว่างไว้")
     df_split_input = pd.DataFrame(default_split_data)
     
@@ -409,7 +407,7 @@ def po_batch_dialog():
             "จำนวนที่เข้า": st.column_config.NumberColumn("จำนวน (ชิ้น)", min_value=1, required=True),
             "หมายเหตุ": st.column_config.TextColumn("สถานะ / หมายเหตุ", width="large")
         },
-        num_rows="dynamic", # อนุญาตให้กด Add Row ได้
+        num_rows="dynamic",
         use_container_width=True,
         hide_index=True
     )
@@ -429,7 +427,6 @@ def po_batch_dialog():
     st.divider()
     if st.button("➕ ยืนยันเพิ่มรายการลงตระกร้า", type="primary", disabled=(diff < 0 or not po_number or not sel_prod)):
         
-        # คำนวณต้นทุนต่อหน่วย (เฉลี่ย)
         # Unit Yuan = Total Yuan / Total Qty Ordered
         unit_yuan = total_yuan_cost / total_qty_ordered if total_qty_ordered > 0 else 0
         
@@ -444,15 +441,8 @@ def po_batch_dialog():
             if pd.notna(recv_date) and order_date:
                 wait_days = (recv_date - order_date).days
 
-            # คำนวณ Cost ของแต่ละ Split (Pro-rate ตามจำนวน)
-            # ถ้า CBM ที่กรอกมาเป็นยอดรวม -> ต้องหารเฉลี่ย
-            # ถ้า CBM ที่กรอกมาเป็นต่อชิ้น -> คูณจำนวน
-            # (สมมติว่าเป็นยอดรวม CBM ของทั้ง Lot ใหญ่ -> ต้องหารกลับมาเป็นต่อชิ้นก่อน)
-            # หรือเพื่อความง่าย: ระบบนี้มักใช้ CBM รวมในการคิดค่าส่ง
-            # สูตร: ค่าส่งของ Split นี้ = (CBM รวม / Total Qty) * Qty Split * Ship Rate
-            
+            # คำนวณ Cost
             cbm_per_piece = cbm_unit / total_qty_ordered if total_qty_ordered > 0 else 0 
-            # *หมายเหตุ: ถ้าหน้างานกรอก CBM ต่อชิ้นมา ให้แก้บรรทัดบนเป็น cbm_per_piece = cbm_unit
             
             this_split_cbm = cbm_per_piece * qty_split
             this_split_ship_cost = this_split_cbm * ship_rate
@@ -460,9 +450,10 @@ def po_batch_dialog():
             this_split_total_yuan = unit_yuan * qty_split
             this_split_total_thb = this_split_total_yuan * ex_rate
             
-            unit_thb = (this_split_total_thb + this_split_total_ship_cost) / qty_split if qty_split > 0 else 0 # (สูตรคร่าวๆ)
+            # --- แก้ไขบรรทัดที่เป็น Error ตรงนี้ครับ ---
+            # เปลี่ยน this_split_total_ship_cost เป็น this_split_ship_cost
+            unit_thb = (this_split_total_thb + this_split_ship_cost) / qty_split if qty_split > 0 else 0
             
-            # เตรียม Object ลง Cart
             item = {
                 "SKU": pid, 
                 "PO": po_number, 
@@ -470,27 +461,27 @@ def po_batch_dialog():
                 "Ord": str(order_date), 
                 "Recv": recv_date_str, 
                 "Wait": wait_days,
-                "Qty": int(qty_split),  # จำนวนของ Split นี้
-                "UnitTHB": 0, # คำนวณละเอียดทีหลังได้ หรือใส่สูตร
+                "Qty": int(qty_split),
+                "UnitTHB": round(unit_thb, 2),
                 "TotYuan": round(this_split_total_yuan, 2),
                 "TotTHB": round(this_split_total_thb, 2), 
                 "Rate": ex_rate, 
                 "ShipRate": ship_rate,
                 "CBM": round(this_split_cbm, 4), 
                 "ShipCost": round(this_split_ship_cost, 2), 
-                "W": weight, # อาจจะต้องหารเฉลี่ยเหมือน CBM ถ้าจำเป็น
+                "W": weight,
                 "UnitYuan": round(unit_yuan, 4), 
                 "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
-                "Note": note_split, # ใช้ Note ของแต่ละ Split
+                "Note": note_split,
                 "Link": shop_link, "WeChat": wechat_id
             }
             st.session_state.po_temp_cart.append(item)
             
         st.success(f"✅ เพิ่ม {pid} จำนวน {len(edited_split_df)} รายการย่อยเรียบร้อยแล้ว!")
-        time.sleep(1) # หน่วงเวลาให้เห็นข้อความ
+        time.sleep(1)
         st.rerun()
 
-    # --- ส่วน Preview Cart (เหมือนเดิม) ---
+    # --- ส่วน Preview Cart ---
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ในตระกร้ามี {len(st.session_state.po_temp_cart)} รายการ")
@@ -504,11 +495,6 @@ def po_batch_dialog():
         if col_sv.button("💾 บันทึกทั้งหมดลง Database"):
             rows = []
             for i in st.session_state.po_temp_cart:
-                 # Map 22 Columns (เรียงตามลำดับ Google Sheet)
-                 # 'รหัสสินค้า', 'เลข PO', 'ขนส่ง', 'วันที่สั่งซื้อ', 'วันที่ได้รับ', 'รอ (วัน)',
-                 # 'จำนวน', 'ราคา/ชิ้น', 'ราคา (หยวน)', 'ราคา (บาท)', 'เรทเงิน', 'เรทค่าขนส่ง', 
-                 # 'ขนาด (คิว)', 'ค่าส่ง', 'น้ำหนัก / KG', 'ราคา/ชิ้น (หยวน)', 'SHOPEE', 'LAZADA', 'TIKTOK',
-                 # 'หมายเหตุ', 'Link_Shop', 'WeChat'
                 row = [
                     i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"],
                     i["Qty"], 0, i["TotYuan"], i["TotTHB"],
@@ -521,7 +507,6 @@ def po_batch_dialog():
                 st.success("บันทึกข้อมูลเรียบร้อย!")
                 st.session_state.po_temp_cart = []
                 st.rerun()
-
 # ==========================================
 # 6. TABS & UI LOGIC
 # ==========================================
