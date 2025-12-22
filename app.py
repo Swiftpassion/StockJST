@@ -116,7 +116,9 @@ def get_po_data():
         # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
-            'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 'จำนวน': 'Qty_Ordered',
+            'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 
+            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order)
+            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) - [NEW]
             'ราคา/ชิ้น': 'Price_Unit_NoVAT', 'ราคา (หยวน)': 'Total_Yuan', 'เรทเงิน': 'Yuan_Rate',
             'เรทค่าขนส่ง': 'Ship_Rate', 'ขนาด (คิว)': 'CBM', 'ค่าส่ง': 'Ship_Cost', 'น้ำหนัก / KG': 'Transport_Weight',
             'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
@@ -126,12 +128,14 @@ def get_po_data():
 
         if not df.empty:
             df['Sheet_Row_Index'] = range(2, len(df) + 2)
-            for col in ['Qty_Ordered', 'Qty_Remaining', 'Total_Yuan', 'Yuan_Rate']:
+            # แปลงตัวเลขให้ชัวร์
+            for col in ['Qty_Ordered', 'Qty_Received', 'Total_Yuan', 'Yuan_Rate']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            if 'Qty_Remaining' not in df.columns and 'Qty_Ordered' in df.columns:
-                 df['Qty_Remaining'] = df['Qty_Ordered']
+            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
+            if 'Qty_Received' not in df.columns:
+                df['Qty_Received'] = 0
                  
         return df
     except Exception as e:
@@ -345,11 +349,11 @@ def show_history_dialog(fixed_product_id=None):
             else: st.warning("ยังไม่มีประวัติการสั่งซื้อ")
 
 # ==========================================
-# [NEW] ฟังก์ชันแก้ไข V4 (ย้ายวันที่รับของมาไว้จุดเดียวกับจำนวน)
+# [UPDATED] ฟังก์ชันแก้ไข V4 (รองรับ Column: จำนวนที่ได้รับ)
 # ==========================================
 @st.dialog("📝 บันทึกรับของ / แก้ไข PO", width="large")
 def po_edit_dialog_v2():
-    st.caption("📦 เลือกรายการที่ 'รอรับของ' -> ระบุจำนวนและวันที่ -> บันทึก (ระบบจัดการยอดค้างให้เอง)")
+    st.caption("📦 เลือกรายการ -> ระบุจำนวนที่ได้รับจริง (ระบบจะเก็บยอดสั่ง vs ยอดรับแยกกันเพื่อเช็คของขาด/เกิน)")
 
     # --- ส่วนที่ 1: ค้นหา ---
     selected_row = None
@@ -358,76 +362,72 @@ def po_edit_dialog_v2():
     if not df_po.empty:
         po_map = {}
         for idx, row in df_po.iterrows():
-            qty = int(row.get('Qty_Ordered', 0))
+            qty_ord = int(row.get('Qty_Ordered', 0))
+            # เช็คว่ารับของหรือยัง โดยดูจากวันที่รับ (Received_Date)
+            # ถ้ามีวันที่ = รับแล้ว, ถ้าไม่มี = รอของ
             recv_date = str(row.get('Received_Date', '')).strip()
-            
-            # --- [จุดที่แก้ไข] ปรับเงื่อนไขการเช็คสถานะ ---
-            # 1. ถ้ามีวันที่รับแล้ว = ✅ รับแล้ว (เป็นรายการประวัติ)
-            # 2. หรือ ถ้าจำนวนเหลือ 0 = ✅ ครบ (ปิดจ็อบแล้ว)
-            # 3. ถ้าไม่มีวันที่ และจำนวน > 0 = ⏳ รอของ
-            
             is_received = (recv_date != '' and recv_date.lower() != 'nat')
-            is_closed = (qty <= 0)
-
-            if is_received:
-                status_icon = "✅ รับแล้ว" # รายการที่เป็น History
-            elif is_closed:
-                status_icon = "✅ ครบ"     # รายการที่ปิดจ็อบแล้ว (Qty 0)
-            else:
-                status_icon = "⏳ รอของ"   # รายการที่ต้องกดรับ
-            # ----------------------------------------
             
-            display_text = f"[{status_icon}] {row.get('PO_Number','-')} : {row.get('Product_ID','-')} (จำนวน: {qty} ชิ้น)"
+            # Icon สถานะ
+            if is_received:
+                status_icon = "✅ รับแล้ว" 
+            elif qty_ord <= 0:
+                status_icon = "✅ ครบ/ปิด"     
+            else:
+                status_icon = "⏳ รอของ"   
+
+            display_text = f"[{status_icon}] {row.get('PO_Number','-')} : {row.get('Product_ID','-')} (สั่ง: {qty_ord})"
             po_map[display_text] = row
         
         # เรียงลำดับ: เอา 'รอของ' ขึ้นก่อน
-        # (เทคนิค: False มาก่อน True ดังนั้นเราเช็คว่า "ไม่ใช่รอของ" จะไปอยู่ข้างหลัง)
         sorted_keys = sorted(po_map.keys(), key=lambda x: "⏳" not in x)
         
         search_key = st.selectbox("🔍 ค้นหารายการ", options=sorted_keys, index=None, placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
+        
+        if search_key:
+            selected_row = po_map[search_key]
+            # หา row index ของจริงใน google sheet
+            if 'Sheet_Row_Index' in selected_row:
+                row_index = selected_row['Sheet_Row_Index']
 
     st.divider()
 
     if selected_row is not None and row_index is not None:
         def get_val(col, default): return selected_row.get(col, default)
         
-        original_qty = int(get_val('Qty_Ordered', 1))
+        # ค่าตั้งต้นจาก Database
+        original_qty_ordered = int(get_val('Qty_Ordered', 1))
         
-        # วันที่สั่งซื้อ
+        # วันที่สั่ง
         try: d_ord = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
         except: d_ord = date.today()
         
-        # วันที่รับของ: ถ้ามีค่าเดิมให้โชว์ ถ้าไม่มี (รอของ) ให้ Default เป็นวันนี้
+        # วันที่รับ (ถ้าเคยรับแล้วให้โชว์ค่าเดิม ถ้ายังให้เป็นวันนี้)
         try: 
             raw_recv = str(get_val('Received_Date', ''))
             if raw_recv and raw_recv.lower() != 'nat' and raw_recv.strip() != '':
-                d_recv = datetime.strptime(raw_recv, "%Y-%m-%d").date()
+                d_recv_default = datetime.strptime(raw_recv, "%Y-%m-%d").date()
             else: 
-                d_recv = date.today()
-        except: d_recv = date.today()
+                d_recv_default = date.today()
+        except: d_recv_default = date.today()
 
-        # --- ส่วนที่ 2: ฟอร์มแก้ไข ---
+        # --- ส่วนที่ 2: แสดงรายละเอียดสินค้า ---
         with st.container(border=True):
-            # --- [เพิ่ม] ส่วนดึงข้อมูลล่าสุดจาก Master Stock ---
             pid_current = str(get_val('Product_ID', '')).strip()
-            
-            # ตั้งค่าเริ่มต้นเป็นค่าจาก PO เดิม
             current_img = get_val('Image', '')
             current_name = get_val('Product_Name', '')
 
-            # ถ้าเจอใน Master ให้ใช้ข้อมูลจาก Master แทน (เพื่อได้รูป/ชื่อล่าสุด)
+            # ดึงข้อมูลล่าสุดจาก Master
             if not df_master.empty:
                 match_row = df_master[df_master['Product_ID'] == pid_current]
                 if not match_row.empty:
                     current_img = match_row.iloc[0].get('Image', current_img)
                     current_name = match_row.iloc[0].get('Product_Name', current_name)
-            # --------------------------------------------------
 
-            st.subheader(f"2. รายละเอียดสินค้า (ยอดรอรับสินค้าปัจจุบัน: {original_qty} ชิ้น)")
+            st.subheader(f"2. รายละเอียดสินค้า (ยอดสั่งซื้อ: {original_qty_ordered} ชิ้น)")
             
             col_img, col_info = st.columns([1, 3])
             with col_img:
-                # ใช้ current_img ที่ดึงมาใหม่
                 if current_img and str(current_img).startswith('http'): 
                     st.image(current_img, width=120)
                 else: 
@@ -435,51 +435,58 @@ def po_edit_dialog_v2():
             
             with col_info:
                 st.markdown(f"**รหัสสินค้า:** `{pid_current}`")
-                # ใช้ current_name ที่ดึงมาใหม่
                 st.markdown(f"**ชื่อสินค้า:** {current_name}")
 
             st.divider()
             
-            # --- [UPDATED] ย้ายวันที่รับของมาไว้ตรงนี้ ---
+            # --- ส่วนที่ 3: บันทึกการรับของ (สำคัญ) ---
             st.markdown("#### 📦 บันทึกการรับของ")
             
-            # จัด Layout: จำนวน | วันที่ | หมายเหตุ
             r_col1, r_col2, r_col3 = st.columns([1.5, 1.5, 2])
             
             with r_col1:
-                e_qty_received = st.number_input("จำนวนที่รับ (ชิ้น)", min_value=1, max_value=original_qty, value=original_qty, key="e_qty")
+                # ช่องกรอกยอดที่ "ได้รับจริง" (Actual)
+                e_qty_received = st.number_input("จำนวนที่ได้รับจริง (ชิ้น)", min_value=1, value=original_qty_ordered, key="e_qty_recv")
             
             with r_col2:
-                # ช่องวันที่รับของ
-                e_recv_date = st.date_input("วันที่ได้รับของ", value=d_recv, key="e_recv_date")
+                e_recv_date = st.date_input("วันที่ได้รับของ", value=d_recv_default, key="e_recv_date")
 
             with r_col3:
-                # Auto Note Logic
+                # Logic สร้าง Note อัตโนมัติ
+                remaining_qty = original_qty_ordered - e_qty_received
                 default_note = get_val('Note', '')
-                remaining_qty = original_qty - e_qty_received
-                if remaining_qty > 0 and not default_note:
-                    default_note = f"รับบางส่วน {e_qty_received} (ค้าง {remaining_qty})"
-                elif not default_note:
-                    default_note = "ได้รับครบ"
+                
+                # ถ้ายังไม่มี Note ให้สร้างใหม่ตามสถานะ
+                if not default_note:
+                    if remaining_qty > 0:
+                        default_note = f"รับบางส่วน {e_qty_received} (ค้าง {remaining_qty})"
+                    elif remaining_qty < 0:
+                        default_note = f"ได้รับเกิน {abs(remaining_qty)} ชิ้น"
+                    else:
+                        default_note = "ได้รับครบ"
+                        
                 e_note = st.text_input("หมายเหตุ", value=default_note, key="e_note")
             
-            # แจ้งเตือนยอดค้าง
+            # แสดงสถานะยอดคงเหลือ
             if remaining_qty > 0:
-                st.warning(f"⚠️ ยอดเดิม {original_qty} -> รับจริง {e_qty_received} | **เหลือค้างส่งอีก {remaining_qty} ชิ้น** (ระบบจะสร้างรายการรอรับของให้อัตโนมัติ)")
+                st.warning(f"⚠️ สั่ง {original_qty_ordered} -> รับจริง {e_qty_received} | **ระบบจะสร้างยอดค้างส่ง {remaining_qty} ชิ้น**")
+            elif remaining_qty < 0:
+                st.info(f"ℹ️ สั่ง {original_qty_ordered} -> รับจริง {e_qty_received} | **ได้รับเกินมา {abs(remaining_qty)} ชิ้น**")
             else:
-                st.success(f"✅ รับครบจำนวน ({original_qty} ชิ้น)")
+                st.success(f"✅ รับครบตามจำนวนสั่ง ({original_qty_ordered} ชิ้น)")
 
             st.divider()
             
-            # ส่วนแก้ไขต้นทุน (ซ่อนไว้ใน Expander)
+            # --- ส่วนที่ 4: แก้ไขต้นทุน/ราคา ---
             with st.expander("💰 แก้ไขต้นทุน / ราคา / ข้อมูลอื่นๆ (กดเพื่อเปิด)"):
                 r2c1, r2c2, r2c3 = st.columns(3)
                 e_yuan = r2c1.number_input("ราคารวม (หยวน)", min_value=0.0, value=float(get_val('Total_Yuan', 0)), step=0.01, key="e_yuan")
                 e_rate = r2c2.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, key="e_rate")
                 
-                # CBM Logic
+                # CBM Pro-rate
                 cbm_val = float(get_val('CBM', 0))
-                suggested_cbm = (cbm_val / original_qty) * e_qty_received if original_qty > 0 else cbm_val
+                # แนะนำค่า CBM ใหม่ตามสัดส่วนที่รับ
+                suggested_cbm = (cbm_val / original_qty_ordered) * e_qty_received if original_qty_ordered > 0 else cbm_val
                 
                 m1, m2 = st.columns(2)
                 e_cbm = m1.number_input(f"CBM (ของยอด {e_qty_received} ชิ้น)", min_value=0.0, value=float(suggested_cbm), step=0.001, format="%.4f", key="e_cbm")
@@ -490,100 +497,95 @@ def po_edit_dialog_v2():
                 e_link = x1.text_input("Link", value=get_val('Link', ''), key="e_link")
                 e_wechat = x2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
 
-        # --- Calculation & Save ---
-        # 1. หายอดหยวนของรอบนี้
-        total_yuan_original = float(get_val('Total_Yuan', 0))
-        # ถ้า user ไม่ได้แก้ e_yuan ให้คำนวณ Pro-rate
-        if remaining_qty > 0 and e_yuan == total_yuan_original:
-             final_calc_yuan = (total_yuan_original / original_qty) * e_qty_received if original_qty > 0 else 0
-        else:
-             final_calc_yuan = e_yuan
+        # --- ส่วนที่ 5: คำนวณและบันทึก ---
+        if st.button("💾 บันทึกรับของ", type="primary"):
+            # ตัวแปรคำนวณ
+            qty_actual = e_qty_received      # ยอดที่รับจริง
+            qty_target = original_qty_ordered # ยอดที่ตั้งใจสั่ง (ของเดิม)
+            
+            # 1. คำนวณราคายอดรับ (Pro-rate)
+            total_yuan_original = float(get_val('Total_Yuan', 0))
+            if e_yuan == total_yuan_original: 
+                 # ถ้า user ไม่ได้แก้ราคาหยวน ให้เฉลี่ยตามสัดส่วน
+                 yuan_received = (total_yuan_original / qty_target) * qty_actual if qty_target > 0 else 0
+            else:
+                 yuan_received = e_yuan # ถ้าแก้ราคา ให้ใช้ราคาที่แก้เลย
 
-        calc_ship_cost = e_cbm * e_ship_rate
-        calc_total_thb = (final_calc_yuan * e_rate)
-        calc_unit_cost = ((final_calc_yuan * e_rate) + calc_ship_cost) / e_qty_received if e_qty_received > 0 else 0
-        
-        st.markdown(f"""
-        <div style="background-color: #1e2a3a; padding: 10px; border-radius: 8px; border-left: 5px solid #4CAF50; margin-bottom: 10px;">
-            💰 <b>สรุปยอดรอบนี้:</b> ต้นทุนต่อชิ้น <b>{calc_unit_cost:,.2f} บาท</b> (รวมส่ง)
-        </div>
-        """, unsafe_allow_html=True)
+            # 2. คำนวณ CBM/Weight ยอดรับ
+            # ถ้า User ไม่ได้แก้ CBM ให้เฉลี่ยตามสัดส่วน
+            if e_cbm == float(get_val('CBM', 0)) and qty_target > 0:
+                 cbm_received = (float(get_val('CBM', 0)) / qty_target) * qty_actual
+            else:
+                 cbm_received = e_cbm
 
-        if st.button("💾 บันทึกรับของ (สร้างประวัติใหม่)", type="primary"):
-            # 1. เตรียมตัวแปร
-            e_ord_date = d_ord 
+            # 3. คำนวณต้นทุนต่อชิ้น (Unit Cost)
+            total_thb_received = (yuan_received * e_rate) + (cbm_received * e_ship_rate)
+            unit_cost_received = total_thb_received / qty_actual if qty_actual > 0 else 0
+
+            # 4. คำนวณยอดคงเหลือ (Pending) -> กรณีของขาด
+            qty_remaining = qty_target - qty_actual
+            yuan_remaining = total_yuan_original - yuan_received
+            cbm_remaining = float(get_val('CBM', 0)) - cbm_received
+            if cbm_remaining < 0: cbm_remaining = 0 # กันติดลบ
+
+            # --- เตรียมข้อมูลสำหรับบันทึก (โครงสร้าง 23 Columns) ---
+            # Columns: [0:ID, 1:PO, 2:Trans, 3:OrdDate, 4:RecvDate, 5:Wait, 6:QtyOrd, 7:QtyRecv(NEW), 8:UnitCost, ...]
+            
             e_po = get_val('PO_Number', '')
             e_trans = get_val('Transport_Type', '')
 
-            # 2. คำนวณยอด
-            # ยอดรับจริง (รายการใหม่ที่จะสร้าง)
-            qty_received = e_qty_received
-            yuan_received = (total_yuan_original / original_qty) * qty_received if original_qty > 0 else 0
-            
-            # ยอดคงเหลือ (ที่จะอัปเดตแถวเดิม)
-            qty_remaining = original_qty - qty_received
-            yuan_remaining = total_yuan_original - yuan_received
-            
-            # คำนวณค่า CBM/Weight สำหรับยอดรับ
-            # (ถ้า User ไม่ได้แก้ e_cbm ระบบจะ Pro-rate ให้ตามสัดส่วน)
-            if e_cbm == float(get_val('CBM', 0)): # ถ้าค่าเท่าเดิม แสดงว่า User ไม่ได้แก้
-                 cbm_received = (float(get_val('CBM', 0)) / original_qty) * qty_received
-            else:
-                 cbm_received = e_cbm # ใช้ค่าที่ User กรอก
-            
-            cbm_remaining = float(get_val('CBM', 0)) - cbm_received
-            if cbm_remaining < 0: cbm_remaining = 0
-
-            # คำนวณบาท
-            total_thb_received = (yuan_received * e_rate) + (cbm_received * e_ship_rate)
-            unit_cost_received = total_thb_received / qty_received if qty_received > 0 else 0
-            
-            # --- เตรียมข้อมูล 2 ชุด ---
-            
-            # ชุด A: แถวเดิม (ให้กลายเป็นยอดค้างส่ง / หรือปิดจ็อบหากเหลือ 0)
-            # เราจะรักษา Order Date เดิมไว้ แต่ลบวันที่รับออก (เพราะมันยังรออยู่)
-            note_remaining = f"รอรับส่วนที่เหลือ ({qty_remaining})" if qty_remaining > 0 else "✅ ปิดรายการ (รับครบแล้ว)"
-            
+            # ชุด A: ยอดค้าง (Remaining) -> ยังไม่ได้รับ
+            # Qty_Ordered = ยอดค้าง, Qty_Received = 0
             data_remaining_update = [
-                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, 
-                None, # วันที่รับ (ว่างไว้ เพราะคือยอดรอ)
-                0,    # จำนวนวันรอ (0 เพราะยังไม่รับ)
-                qty_remaining, # *จำนวนที่เหลือ*
-                0, # ราคาต่อหน่วย (ไม่ต้องแสดงของยอดรอ)
-                round(yuan_remaining, 2), 
-                0, # Total THB (รอคำนวณเมื่อรับจริง)
+                get_val('Product_ID', ''), e_po, e_trans, d_ord.strftime("%Y-%m-%d"), 
+                None, # Recv Date ว่าง
+                0,    # Wait Days 0
+                qty_remaining, # Qty Order (ส่วนที่เหลือ)
+                0,             # Qty Recv (ยังไม่รับ)
+                0, round(yuan_remaining, 2), 0,
                 e_rate, e_ship_rate, round(cbm_remaining, 4), 0, e_weight, 
                 0, get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
-                note_remaining, e_link, e_wechat
+                f"รอรับส่วนที่เหลือ ({qty_remaining})", e_link, e_wechat
             ]
 
-            # ชุด B: แถวใหม่ (History Log ของการรับของรอบนี้)
-            # อันนี้จะไปต่อท้าย Database
-            recv_date_str = e_recv_date
-            wait_days = (e_recv_date - e_ord_date).days
-            
+            # ชุด B: ยอดรับเข้า (History) -> บันทึกประวัติ
+            # Qty_Ordered = ยอดที่รับรอบนี้ (ในฐานะ target), Qty_Received = ยอดจริง
+            recv_date_str = e_recv_date.strftime("%Y-%m-%d")
+            wait_days = (e_recv_date - d_ord).days
+
             data_received_log = [
-                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, 
-                recv_date_str, # วันที่รับจริง
+                get_val('Product_ID', ''), e_po, e_trans, d_ord.strftime("%Y-%m-%d"), 
+                recv_date_str, 
                 wait_days,
-                qty_received, # *จำนวนที่รับรอบนี้*
+                qty_actual,    # Qty Order (รอบนี้ตัดมาเท่านี้)
+                qty_actual,    # Qty Recv (ได้รับจริงเท่านี้)
                 unit_cost_received,
                 round(yuan_received, 2),
                 round(total_thb_received, 2),
                 e_rate, e_ship_rate, round(cbm_received, 4), round(cbm_received*e_ship_rate, 2), e_weight,
-                round(yuan_received/qty_received, 4) if qty_received else 0,
+                round(yuan_received/qty_actual, 4) if qty_actual else 0,
                 get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
                 e_note, e_link, e_wechat
             ]
 
-            # 3. บันทึกข้อมูล (ใช้ฟังก์ชัน Split เดิมได้เลย แต่สลับข้อมูล)
-            # logic เดิม: update(current), append(new)
-            # logic ใหม่: update(ยอดรอ), append(ยอดรับ) -> ทำให้ยอดรับไปอยู่บรรทัดล่างสุดเสมอ
-            
-            success = save_po_edit_split(row_index, data_remaining_update, data_received_log)
-            
+            # --- Decision: Split หรือ Update ---
+            if qty_remaining > 0:
+                # กรณีของขาด: Update แถวเดิมเป็นยอดรอ + Append แถวใหม่เป็นยอดรับ
+                success = save_po_edit_split(row_index, data_remaining_update, data_received_log)
+                msg = f"✅ บันทึกรับของ {qty_actual} ชิ้น (เหลือค้าง {qty_remaining})"
+            else:
+                # กรณีครบ หรือ เกิน: Update แถวเดิมเป็นยอดรับเลย (ปิดจ็อบ)
+                # ใช้ data_received_log ทับแถวเดิมไปเลย
+                
+                # กรณีเกิน (Overage): Qty Ordered ให้คงค่าเดิมไว้ เพื่อให้เห็นว่าสั่งน้อยกว่ารับ
+                if qty_remaining < 0: 
+                    data_received_log[6] = qty_target # คืนค่า Qty Ordered เป็นค่าเดิม (เช่น สั่ง 100 รับ 105 -> Ord=100, Recv=105)
+
+                success = save_po_edit_update(row_index, data_received_log)
+                msg = f"✅ บันทึกรับของเรียบร้อย ({qty_actual} ชิ้น)"
+
             if success:
-                st.success(f"✅ บันทึกรับของ {qty_received} ชิ้น ลงท้ายตารางเรียบร้อยแล้ว!")
+                st.success(msg)
                 st.session_state.active_dialog = None
                 time.sleep(1)
                 st.rerun()
@@ -592,25 +594,21 @@ def po_edit_dialog_v2():
         st.info("👈 กรุณาเลือกรายการที่ต้องการรับของจากด้านบน")
 
 # ==========================================
-# [NEW] ฟังก์ชันบันทึกแบบ Batch (Fix หน้าขาว + Reset ค่าเสถียร)
+# [NEW] ฟังก์ชันบันทึกแบบ Batch (แก้ไข: ตัดส่วนรับของออก เน้นเปิด PO รอของ)
 # ==========================================
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
-    st.caption("💡 กรอกข้อมูลสินค้า -> กดเพิ่มลงตระกร้า (รายการจะไปกองรวมด้านล่าง) -> กดบันทึก Database ทีเดียว")
+    st.caption("💡 กรอกข้อมูลสินค้า -> กดเพิ่มลงตระกร้า -> กดบันทึก (รายการจะถูกบันทึกเป็น 'รอรับของ')")
 
     # --- 0. ส่วนจัดการ Reset ค่า (ทำงานก่อนวาดหน้าจอเสมอ) ---
-    # ตรวจสอบว่ารอบที่แล้วมีการสั่งให้ Reset หรือไม่
     if st.session_state.get("need_reset_inputs", False):
-        # ล้างค่าใน Session State ที่ผูกกับ Widget
-        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight"]
+        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", "bp_note"]
         for key in keys_to_reset:
             if key in st.session_state:
-                del st.session_state[key] # ลบทิ้งเพื่อให้ Widget กลับไปใช้ค่า Default
-        
-        # ปิด Flag เมื่อทำเสร็จ
+                del st.session_state[key]
         st.session_state["need_reset_inputs"] = False
 
-    # --- 1. Header (ค่าพวกนี้จะไม่ถูกลบ) ---
+    # --- 1. Header (ข้อมูลเอกสาร) ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
@@ -625,7 +623,6 @@ def po_batch_dialog():
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
-        # Widget เหล่านี้จะถูก Reset ได้เพราะเราจัดการที่ข้อ 0.
         sel_prod = st.selectbox("เลือกสินค้า", prod_list, index=None, key="bp_sel_prod")
         
         pid = ""
@@ -642,7 +639,6 @@ def po_batch_dialog():
         
         with col_input:
             r1c1, r1c2, r1c3 = st.columns(3)
-            # กำหนด value=... เพื่อให้เวลา Reset กลับมาเป็นค่านี้
             total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=100, key="bp_qty")
             cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, key="bp_cost_yuan")
             rate_money = r1c3.number_input("เรทเงิน (หยวน)", min_value=0.0, step=0.01, value=5.0, key="bp_rate")
@@ -651,9 +647,15 @@ def po_batch_dialog():
             cbm_val = r2c1.number_input("ขนาด (คิว) ", min_value=0.0, format="%.4f", key="bp_cbm")
             ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, value=5000.0, key="bp_ship_rate")
             weight_val = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, key="bp_weight")
+            
+            # Checkbox CBM
             is_cbm_per_piece = st.checkbox("ขนาด(คิว) 'ต่อชิ้น' (ไม่ติ๊ก=รวม)", value=False)
 
-            with st.expander("ข้อมูลเพิ่มเติม"):
+            # ย้าย Note มาไว้ตรงนี้
+            st.markdown("---")
+            po_note = st.text_input("หมายเหตุ (Note)", placeholder="ระบุรายละเอียดเพิ่มเติม (ถ้ามี)", key="bp_note")
+
+            with st.expander("ข้อมูลเพิ่มเติม (Link / ราคาขาย)"):
                 x1, x2 = st.columns(2)
                 link_shop = x1.text_input("Link", key="bp_link")
                 wechat = x2.text_input("WeChat", key="bp_wechat")
@@ -662,119 +664,98 @@ def po_batch_dialog():
                 p_lazada = m2.number_input("Lazada", value=0, key="bp_shop_l")
                 p_tiktok = m3.number_input("TikTok", value=0, key="bp_shop_t")
 
-    # --- 3. การรับของ ---
-    st.subheader("3. 📦 การรับสินค้า")
-    recv_mode = st.radio("รูปแบบการรับของ:", ["✅ รับสินค้าครบภายในรอบเดียว", "🚚 ทยอยรับ (Split / ของขาด)"], horizontal=True)
+    # --- 3. (ถูกตัดออก) --- 
     
-    split_rows_to_process = [] 
-
-    if recv_mode == "✅ รับสินค้าครบภายในรอบเดียว":
-        col_simple_date, col_simple_note = st.columns([1, 2])
-        s_date = col_simple_date.date_input("วันที่ของเข้า", date.today())
-        s_note = col_simple_note.text_input("หมายเหตุ", value="ได้รับครบ")
-        split_rows_to_process = [{"วันที่ได้รับ": s_date, "จำนวนที่เข้า": total_qty, "หมายเหตุ": s_note}]
-    else:
-        st.info("💡 กรุณาระบุยอดที่ได้รับจริง (เว้นวันที่ว่างไว้ = ยังไม่ได้รับ / รอส่ง)")
-        default_data = [{"วันที่ได้รับ": date.today(), "จำนวนที่เข้า": 0, "หมายเหตุ": ""}]
-        df_split_input = pd.DataFrame(default_data)
-        edited_split_df = st.data_editor(
-            df_split_input,
-            column_config={
-                "วันที่ได้รับ": st.column_config.DateColumn("วันที่ (เว้นว่าง=รอ)", format="YYYY-MM-DD"),
-                "จำนวนที่เข้า": st.column_config.NumberColumn("จำนวนสินค้ารอรับ", min_value=0, required=True),
-                "หมายเหตุ": st.column_config.TextColumn("หมายเหตุ", width="large")
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True
-        )
-        current_sum = edited_split_df["จำนวนที่เข้า"].sum()
-        diff = total_qty - current_sum
-        
-        if diff == 0:
-            st.success(f"✅ ยอดครบถ้วน: {current_sum} / {total_qty}")
-            for _, row in edited_split_df.iterrows():
-                if row['จำนวนที่เข้า'] > 0:
-                    d_val = row['วันที่ได้รับ']
-                    if pd.isna(d_val) or str(d_val) == 'NaT': d_val = None
-                    split_rows_to_process.append({"วันที่ได้รับ": d_val, "จำนวนที่เข้า": row['จำนวนที่เข้า'], "หมายเหตุ": row['หมายเหตุ']})
-        else:
-            if diff > 0: st.warning(f"⚠️ ยอดยังไม่ครบ: ขาดอีก {diff} ชิ้น")
-            else: st.error(f"❌ ยอดเกิน: เกินมา {-diff} ชิ้น")
-            split_rows_to_process = [] 
-
-    # --- 4. ปุ่มเพิ่มรายการ (Logic แบบ Flag) ---
+    # --- 4. ปุ่มเพิ่มรายการ ---
     st.divider()
-    btn_disabled = (not po_number) or (not sel_prod) or (len(split_rows_to_process) == 0)
+    # ปุ่มจะกดได้เมื่อมีเลข PO และ เลือกสินค้าแล้ว
+    btn_disabled = (not po_number) or (not sel_prod)
 
     if st.button("➕ เพิ่มรายการลงตระกร้า", type="primary", disabled=btn_disabled):
         # คำนวณค่าต่างๆ
         unit_yuan = cost_yuan / total_qty if total_qty > 0 else 0
-        cbm_per_piece = cbm_val if is_cbm_per_piece else (cbm_val / total_qty if total_qty > 0 else 0)
-
-        for row in split_rows_to_process:
-            q_split = row['จำนวนที่เข้า']
-            d_recv = row['วันที่ได้รับ']
-            note_split = row['หมายเหตุ']
-            
-            recv_str = d_recv.strftime("%Y-%m-%d") if d_recv else ""
-            wait_days = (d_recv - order_date).days if d_recv and order_date else 0
-            
-            split_cbm = cbm_per_piece * q_split
-            split_ship_cost = split_cbm * ship_rate
-            split_yuan = unit_yuan * q_split
-            split_thb = split_yuan * rate_money
-            unit_thb_final = (split_thb + split_ship_cost) / q_split if q_split > 0 else 0
-
-            item = {
-                "SKU": pid, "PO": po_number, "Trans": transport_type,
-                "Ord": str(order_date), "Recv": recv_str, "Wait": wait_days,
-                "Qty": int(q_split), "UnitTHB": round(unit_thb_final, 2),
-                "TotYuan": round(split_yuan, 2), "TotTHB": round(split_thb, 2), 
-                "Rate": rate_money, "ShipRate": ship_rate,
-                "CBM": round(split_cbm, 4), "ShipCost": round(split_ship_cost, 2), 
-                "W": weight_val, "UnitYuan": round(unit_yuan, 4), 
-                "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
-                "Note": note_split, "Link": link_shop, "WeChat": wechat
-            }
-            st.session_state.po_temp_cart.append(item)
-
-        st.toast(f"✅ เพิ่ม {pid} เรียบร้อย!", icon="🛒")
         
-        # 🟢 เปิด Flag สั่งให้รอบหน้า Reset ค่า Input
+        # คำนวณ CBM รวม และ CBM ต่อชิ้น เพื่อใช้บันทึก
+        if is_cbm_per_piece:
+            total_cbm = cbm_val * total_qty
+        else:
+            total_cbm = cbm_val
+        
+        # คำนวณต้นทุนคร่าวๆ (Estimated)
+        total_ship_cost = total_cbm * ship_rate
+        total_thb = (cost_yuan * rate_money) # ค่าของ (บาท)
+        # unit_thb รวมค่าส่ง (โดยประมาณ)
+        unit_thb_final = ((total_thb) + total_ship_cost) / total_qty if total_qty > 0 else 0
+
+        # วันที่รับ = ว่าง, จำนวนวันรอ = 0 (เพราะเป็นสถานะ Pending)
+        recv_str = "" 
+        wait_days = 0 
+        
+        item = {
+            "SKU": pid, "PO": po_number, "Trans": transport_type,
+            "Ord": str(order_date), 
+            "Recv": recv_str,      # ยังไม่รับ
+            "Wait": wait_days,     # ยังไม่นับวัน
+            "Qty": int(total_qty), # ยอดสั่ง
+            "UnitTHB": round(unit_thb_final, 2),
+            "TotYuan": round(cost_yuan, 2), 
+            "TotTHB": round(total_thb, 2), # บันทึกเฉพาะค่าของ (บาท) ตาม Logic เดิม
+            "Rate": rate_money, 
+            "ShipRate": ship_rate,
+            "CBM": round(total_cbm, 4), 
+            "ShipCost": round(total_ship_cost, 2), 
+            "W": weight_val, 
+            "UnitYuan": round(unit_yuan, 4), 
+            "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
+            "Note": po_note,       # ใช้ Note จาก Section 2
+            "Link": link_shop, "WeChat": wechat
+        }
+        st.session_state.po_temp_cart.append(item)
+
+        st.toast(f"✅ เพิ่ม {pid} ลงตระกร้าแล้ว (สถานะ: รอรับของ)", icon="🛒")
+        
+        # เปิด Flag Reset ค่า
         st.session_state["need_reset_inputs"] = True
-        # สั่ง Rerun เพื่อให้กลับไปทำงานที่บรรทัดบนสุดใหม่ (และล้างค่าตาม Flag)
         st.rerun()
 
     # --- 5. ตระกร้า ---
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
-        st.dataframe(pd.DataFrame(st.session_state.po_temp_cart)[["SKU", "Qty", "Recv", "TotTHB", "Note"]], use_container_width=True, hide_index=True)
+        # แสดงผลตระกร้า ตัด Recv ออกจากตารางโชว์ เพราะมันว่างเปล่า
+        st.dataframe(pd.DataFrame(st.session_state.po_temp_cart)[["SKU", "Qty", "TotYuan", "Note"]], use_container_width=True, hide_index=True)
         
         c1, c2 = st.columns([1, 4])
         if c1.button("🗑️ ล้างตระกร้า"):
             st.session_state.po_temp_cart = []
             st.rerun()
             
-        if c2.button("💾 บันทึกทั้งหมด", type="primary"):
-            # ... (โค้ดเตรียม data rows_to_save เหมือนเดิม) ...
+        if c2.button("💾 บันทึก PO ทั้งหมด", type="primary"):
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
-                 # ... (logic เดิม) ...
-                 row = [i["SKU"], i["PO"], i["Trans"], i["Ord"], i["Recv"], i["Wait"], i["Qty"], 0, i["TotYuan"], i["TotTHB"],
-                       i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], i["UnitYuan"], i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"]]
+                 # เพิ่ม 0 (Received Qty) เข้าไปในลำดับที่ 7 (ต่อจาก Qty Ordered)
+                 row = [
+                     i["SKU"], i["PO"], i["Trans"], i["Ord"], 
+                     i["Recv"], # วันที่รับ (ว่าง)
+                     i["Wait"], 
+                     i["Qty"],  # ยอดสั่งซื้อ
+                     0,         # <--- [NEW] ยอดรับจริง (ใส่ 0 ไว้ก่อน เพราะยังไม่ได้รับ)
+                     0,         # Price Unit
+                     i["TotYuan"], 
+                     0,         # Total THB
+                     i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], 
+                     i["UnitYuan"], 
+                     i["Shopee"], i["Laz"], i["Tik"], 
+                     i["Note"], i["Link"], i["WeChat"]
+                 ]
                  rows_to_save.append(row)
 
             if save_po_batch_to_sheet(rows_to_save):
-                st.success("บันทึกสำเร็จ!")
+                st.success("✅ เปิด PO เรียบร้อย! (ยอดรับตั้งต้นเป็น 0)")
                 st.session_state.po_temp_cart = []
                 if "bp_po_num" in st.session_state: del st.session_state["bp_po_num"]
                 
-                # --- [เพิ่มบรรทัดนี้] : สั่งปิดหน้าต่างเมื่อทำงานจบ ---
                 st.session_state.active_dialog = None 
-                # -----------------------------------------------
-                
                 time.sleep(1)
                 st.rerun()
 # ==========================================
