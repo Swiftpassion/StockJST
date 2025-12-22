@@ -861,7 +861,7 @@ with tab1:
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
 # ==========================================
-# TAB 2: Purchase Orders (Restored UI)
+# TAB 2: Purchase Orders (Updated V3)
 # ==========================================
 with tab2:
     col_head, col_action = st.columns([4, 2])
@@ -986,12 +986,11 @@ with tab2:
                 }
                 .custom-po-table td {
                     padding: 8px 5px;
-                    border-bottom: 1px solid #111; /* เส้นขอบให้กลืนไปกับพื้นหลัง */
+                    border-bottom: 1px solid #111; 
                     border-right: 1px solid #444;
                     vertical-align: middle;
                     text-align: center; 
                 }
-                /* ลบ background-color: #222 ออกจาก td-merged เพื่อให้สีจาก tr แสดงผล */
                 .td-merged {
                     border-right: 2px solid #666 !important; 
                 }
@@ -1003,6 +1002,8 @@ with tab2:
                 .status-waiting { color: #ffa726; font-weight: bold; }
                 .status-done { color: #66bb6a; font-weight: bold; }
                 .num-val { font-family: 'Courier New', monospace; }
+                a.table-link { text-decoration: none; font-size: 16px; }
+                a.table-link:hover { transform: scale(1.2); display:inline-block; }
             </style>
             """, unsafe_allow_html=True)
 
@@ -1053,17 +1054,16 @@ with tab2:
 
             grouped = df_final.groupby(['PO_Number', 'Product_ID'], sort=False)
 
-            # ใช้ enumerate เพื่อเช็คลำดับคู่/คี่ สำหรับสลับสี
             for group_idx, ((po, pid), group) in enumerate(grouped):
                 row_count = len(group)
                 
-                # กำหนดสีพื้นหลัง: คู่=สีเข้ม(#222), คี่=สีอ่อน(#2e2e2e)
+                # สลับสีพื้นหลัง
                 bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
                 
                 for idx, (i, row) in enumerate(group.iterrows()):
-                    # ใส่สีพื้นหลังที่ <tr> เพื่อให้คลุมทั้งแถว
                     table_html += f'<tr style="background-color: {bg_color};">'
                     
+                    # --- [Merged Columns] แสดงแค่รอบเดียว ---
                     if idx == 0:
                         img_src = row.get('Image', '')
                         img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
@@ -1079,6 +1079,7 @@ with tab2:
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
                     
+                    # --- [Split Columns] แสดงทุกบรรทัด ---
                     recv_d = fmt_date(row['Received_Date'])
                     status_cls = "status-done" if recv_d != "-" else "status-waiting"
                     table_html += f'<td class="{status_cls}">{recv_d}</td>'
@@ -1087,31 +1088,39 @@ with tab2:
                     wait_show = f"{wait_val} วัน" if wait_val != "-" else "-"
                     table_html += f'<td>{wait_show}</td>'
                     
-                    qty_ord = int(row.get('Qty_Ordered', 0))
+                    # --- [Qty Ordered] รวมเซลล์ (Merged) ---
+                    # แสดงเฉพาะแถวแรก (idx == 0)
+                    if idx == 0:
+                        qty_ord = int(row.get('Qty_Ordered', 0))
+                        table_html += f'<td rowspan="{row_count}" class="td-merged">{qty_ord:,}</td>'
+
+                    # --- [Qty Received] แสดงทุกบรรทัด ---
+                    qty_ord_check = int(row.get('Qty_Ordered', 0)) # ใช้เทียบค่าเฉยๆ
                     qty_recv = int(row.get('Qty_Received', 0))
-                    q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_ord) else ""
-                    
-                    table_html += f'<td>{qty_ord:,}</td>'
+                    q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_ord_check) else ""
                     table_html += f'<td style="{q_style} font-weight:bold;">{qty_recv:,}</td>'
 
+                    # --- [Pricing Info] Merged Columns ---
                     if idx == 0:
                         p_yuan = fmt_num(row.get('Total_Yuan', 0))
                         p_thb = fmt_num(row.get('Total_THB', 0))
                         rate = fmt_num(row.get('Yuan_Rate', 0))
                         ship_rate = fmt_num(row.get('Ship_Rate', 0))
-                        
-                        # [แก้ไข] ปรับ CBM เป็น 2 ตำแหน่ง
                         cbm = fmt_num(row.get('CBM', 0), 2) 
-                        
                         ship_cost = fmt_num(row.get('Ship_Cost', 0))
                         weight = fmt_num(row.get('Transport_Weight', 0))
                         shop_s = fmt_num(row.get('Shopee_Price', 0))
                         shop_l = fmt_num(row.get('Lazada_Price', 0))
                         shop_t = fmt_num(row.get('TikTok_Price', 0))
                         note = row.get('Note', '')
+                        
+                        # Links
                         link = row.get('Link', '')
                         wechat = row.get('WeChat', '')
-                        link_html = f'<a href="{link}" target="_blank">🔗</a>' if link else '-'
+                        
+                        link_html = f'<a href="{link}" target="_blank" class="table-link">🔗</a>' if link else '-'
+                        # [NEW] WeChat เป็น Link
+                        wechat_html = f'<a href="{wechat}" target="_blank" class="table-link">💬</a>' if wechat else '-'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_yuan}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_thb}</td>'
@@ -1126,7 +1135,7 @@ with tab2:
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{shop_t}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged" style="max-width: 150px; overflow:hidden;">{note}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{link_html}</td>'
-                        table_html += f'<td rowspan="{row_count}" class="td-merged">{wechat}</td>'
+                        table_html += f'<td rowspan="{row_count}" class="td-merged">{wechat_html}</td>'
                     
                     table_html += "</tr>"
 
