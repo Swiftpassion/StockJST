@@ -71,36 +71,42 @@ def highlight_negative(val):
     return ''
 
 @st.cache_data(ttl=300)
-def get_stock_from_sheet():
+def get_po_data():
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
-        ws = sh.worksheet(TAB_NAME_STOCK)
+        ws = sh.worksheet(TAB_NAME_PO)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Clean Headers
-        df.columns = df.columns.astype(str).str.strip()
+        # --- Map ชื่อคอลัมน์ (เพิ่ม 'จำนวนที่ได้รับ') ---
         col_map = {
-            'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'ID': 'Product_ID',
-            'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
-            'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
-            'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock', 'คงเหลือ': 'Initial_Stock',
-            'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit',
-            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type'
+            'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
+            'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 
+            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order)
+            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) [NEW]
+            'ราคา/ชิ้น': 'Price_Unit_NoVAT', 'ราคา (หยวน)': 'Total_Yuan', 'เรทเงิน': 'Yuan_Rate',
+            'เรทค่าขนส่ง': 'Ship_Rate', 'ขนาด (คิว)': 'CBM', 'ค่าส่ง': 'Ship_Cost', 'น้ำหนัก / KG': 'Transport_Weight',
+            'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
+            'ราคา (บาท)': 'Total_THB', 'Link_Shop': 'Link', 'WeChat': 'WeChat'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
-        
-        if 'Initial_Stock' not in df.columns: df['Initial_Stock'] = 0
-        if 'Product_ID' not in df.columns: df['Product_ID'] = "Unknown"
-        if 'Product_Name' not in df.columns: df['Product_Name'] = df['Product_ID']
-        if 'Product_Type' not in df.columns: df['Product_Type'] = "ทั่วไป"
-        
-        df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
+
+        if not df.empty:
+            df['Sheet_Row_Index'] = range(2, len(df) + 2)
+            # แปลงตัวเลขให้ชัวร์
+            for col in ['Qty_Ordered', 'Qty_Received', 'Total_Yuan', 'Yuan_Rate']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
+            if 'Qty_Received' not in df.columns:
+                df['Qty_Received'] = 0
+                 
         return df
     except Exception as e:
-        st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
+        st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -187,14 +193,14 @@ def save_po_edit_split(row_index, current_row_data, new_row_data):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # 1. Update แถวเดิม (A:V)
+        # 1. Update แถวเดิม (A:W)
         formatted_curr = []
         for item in current_row_data:
             if isinstance(item, (date, datetime)): formatted_curr.append(item.strftime("%Y-%m-%d"))
             elif item is None: formatted_curr.append("")
             else: formatted_curr.append(item)
         
-        range_name = f"A{row_index}:V{row_index}" 
+        range_name = f"A{row_index}:W{row_index}" 
         ws.update(range_name, [formatted_curr])
         
         # 2. Append แถวใหม่ (ยอดที่เหลือ)
@@ -228,8 +234,8 @@ def save_po_edit_update(row_index, current_row_data):
             else: 
                 formatted_curr.append(item)
         
-        # Update ข้อมูลทับแถวเดิม (A ถึง V)
-        range_name = f"A{row_index}:V{row_index}" 
+        # Update ข้อมูลทับแถวเดิม (A ถึง W)
+        range_name = f"A{row_index}:W{row_index}" 
         ws.update(range_name, [formatted_curr])
         
         st.cache_data.clear() 
@@ -733,13 +739,13 @@ def po_batch_dialog():
         if c2.button("💾 บันทึก PO ทั้งหมด", type="primary"):
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
-                 # เพิ่ม 0 (Received Qty) เข้าไปในลำดับที่ 7 (ต่อจาก Qty Ordered)
+                 # เพิ่ม 0 (Received Qty) เข้าไปในลำดับที่ 8 (ต่อจาก Qty Ordered)
                  row = [
                      i["SKU"], i["PO"], i["Trans"], i["Ord"], 
                      i["Recv"], # วันที่รับ (ว่าง)
                      i["Wait"], 
                      i["Qty"],  # ยอดสั่งซื้อ
-                     0,         # <--- [NEW] ยอดรับจริง (ใส่ 0 ไว้ก่อน เพราะยังไม่ได้รับ)
+                     0,         # <--- [NEW] ยอดรับจริง (ใส่ 0 ไว้ก่อน)
                      0,         # Price Unit
                      i["TotYuan"], 
                      0,         # Total THB
