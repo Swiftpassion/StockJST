@@ -387,7 +387,7 @@ def po_edit_dialog_v2():
                     current_name = match_row.iloc[0].get('Product_Name', current_name)
             # --------------------------------------------------
 
-            st.subheader(f"2. รายละเอียดสินค้า (ยอดปัจจุบัน: {original_qty} ชิ้น)")
+            st.subheader(f"2. รายละเอียดสินค้า (ยอดรอรับสินค้าปัจจุบัน: {original_qty} ชิ้น)")
             
             col_img, col_info = st.columns([1, 3])
             with col_img:
