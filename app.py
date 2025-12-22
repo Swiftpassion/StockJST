@@ -326,10 +326,25 @@ if not df_sale.empty and 'Date_Only' in df_sale.columns:
     recent_sales_map = df_latest_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
 
 # ==========================================
-# [UPDATED] Show History Dialog (HTML Table Style)
+# [UPDATED] Show History Dialog (Sorted by Order Date: Past -> Present)
 # ==========================================
 @st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
 def show_history_dialog(fixed_product_id=None):
+    # --- [CSS Hack] บังคับขยายขนาด Dialog ให้กว้างและสูงขึ้น ---
+    st.markdown("""
+    <style>
+        div[data-testid="stDialog"] {
+            width: 95vw !important; /* กว้าง 95% ของหน้าจอ */
+            max-width: 95vw !important;
+            min-width: 90vw !important;
+        }
+        div[role="dialog"] {
+            width: 95vw !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    # -------------------------------------------------------
+
     selected_pid = fixed_product_id
     
     # ถ้าไม่ได้ระบุ PID มา (กดเปิดเอง) ให้เลือก Dropdown
@@ -361,8 +376,8 @@ def show_history_dialog(fixed_product_id=None):
                 valid_cols = [c for c in cols_to_use if c in df_master_t.columns]
                 df_final = pd.merge(df_history, df_master_t[valid_cols], on='Product_ID', how='left')
                 
-                # Sort ข้อมูล
-                df_final = df_final.sort_values(by=['PO_Number', 'Order_Date', 'Received_Date'])
+                # [แก้ไข] Sort ข้อมูล: เรียงตามวันที่สั่งซื้อ (เก่า -> ใหม่) เป็นหลัก
+                df_final = df_final.sort_values(by=['Order_Date', 'PO_Number', 'Received_Date'], ascending=[True, True, True])
 
                 # คำนวณ Wait Days
                 def calc_wait(row):
@@ -371,10 +386,17 @@ def show_history_dialog(fixed_product_id=None):
                     return "-"
                 df_final['Calc_Wait'] = df_final.apply(calc_wait, axis=1)
 
-                # 3. CSS Styles (Copy จาก Tab 2)
+                # 3. CSS Styles (ปรับปรุงให้ Table สูงขึ้นด้วย)
                 st.markdown("""
                 <style>
-                    .po-table-container { overflow-x: auto; border-radius: 8px; margin-top: 10px; }
+                    /* ปรับ Container ของตารางให้สูงและ Scroll ได้ */
+                    .po-table-container { 
+                        overflow-x: auto; 
+                        overflow-y: auto;
+                        max-height: 75vh; /* ความสูงตารางสูงสุด 75% ของจอ */
+                        border-radius: 8px; 
+                        margin-top: 10px; 
+                    }
                     .custom-po-table {
                         width: 100%; border-collapse: separate; border-spacing: 0;
                         font-family: 'Sarabun', sans-serif; font-size: 13px; color: #e0e0e0; min-width: 1500px;
