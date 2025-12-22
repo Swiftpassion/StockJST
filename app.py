@@ -1057,6 +1057,10 @@ with tab2:
             for group_idx, ((po, pid), group) in enumerate(grouped):
                 row_count = len(group)
                 
+                # [แก้ไข] คำนวณยอดสั่งซื้อรวมของกลุ่มนี้ (Sum Qty Ordered)
+                # เพื่อให้ได้ยอด Total จริงๆ ไม่ว่าจะถูก split เป็นกี่แถว
+                total_order_qty = group['Qty_Ordered'].sum()
+
                 # สลับสีพื้นหลัง
                 bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
                 
@@ -1068,6 +1072,7 @@ with tab2:
                         img_src = row.get('Image', '')
                         img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
                         
+                        # คำนวณราคาเฉลี่ยต่อชิ้น (จากยอดรวม)
                         try: price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                         except: price_unit_thb = 0
                         try: price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
@@ -1088,16 +1093,17 @@ with tab2:
                     wait_show = f"{wait_val} วัน" if wait_val != "-" else "-"
                     table_html += f'<td>{wait_show}</td>'
                     
-                    # --- [Qty Ordered] รวมเซลล์ (Merged) ---
-                    # แสดงเฉพาะแถวแรก (idx == 0)
+                    # --- [Qty Ordered] แสดงยอดรวม (Merged) ---
+                    # แสดงเฉพาะแถวแรก และใช้ค่า total_order_qty ที่ Sum มาแล้ว
                     if idx == 0:
-                        qty_ord = int(row.get('Qty_Ordered', 0))
-                        table_html += f'<td rowspan="{row_count}" class="td-merged">{qty_ord:,}</td>'
+                        table_html += f'<td rowspan="{row_count}" class="td-merged">{int(total_order_qty):,}</td>'
 
-                    # --- [Qty Received] แสดงทุกบรรทัด ---
-                    qty_ord_check = int(row.get('Qty_Ordered', 0)) # ใช้เทียบค่าเฉยๆ
+                    # --- [Qty Received] แสดงแยกตามจริง ---
                     qty_recv = int(row.get('Qty_Received', 0))
-                    q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_ord_check) else ""
+                    # เช็คยอดรับเกิน/ขาด (เทียบกับ row นั้นๆ หรือจะเทียบ Total ก็ได้ แต่เทียบ row ปลอดภัยกว่าสำหรับสี)
+                    # แต่ถ้าอยากเน้นแค่ยอดรับ > 0 ให้สีแดงถ้าไม่เท่ากับ order ของ row นั้น
+                    qty_row_ord = int(row.get('Qty_Ordered', 0))
+                    q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_row_ord) else ""
                     table_html += f'<td style="{q_style} font-weight:bold;">{qty_recv:,}</td>'
 
                     # --- [Pricing Info] Merged Columns ---
