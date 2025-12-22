@@ -474,8 +474,18 @@ def po_edit_dialog_v2():
         """, unsafe_allow_html=True)
 
         if st.button("💾 บันทึกรับของ", type="primary"):
+            # -------------------------------------------------------
+            # [FIX] 1. Define the missing variables first
+            # -------------------------------------------------------
+            e_ord_date = d_ord  # Use the date calculated earlier at line 405
+            e_po = get_val('PO_Number', '')
+            e_trans = get_val('Transport_Type', '')
+            # -------------------------------------------------------
+
             recv_str = e_recv_date.strftime("%Y-%m-%d")
-            wait_days = (e_recv_date - e_ord_date).days
+            
+            # Now this line will work because e_ord_date is defined
+            wait_days = (e_recv_date - e_ord_date).days 
             
             final_unit_thb = calc_unit_cost
             final_total_thb = calc_total_thb
