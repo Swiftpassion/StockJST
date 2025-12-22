@@ -1057,7 +1057,7 @@ with tab1:
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
 # ==========================================
-# TAB 2: Purchase Orders (Updated V3)
+# TAB 2: Purchase Orders (Sorted by Order Date)
 # ==========================================
 with tab2:
     col_head, col_action = st.columns([4, 2])
@@ -1142,7 +1142,13 @@ with tab2:
 
         # --- 4. Render Custom HTML Table ---
         if not df_final.empty:
-            df_final = df_final.sort_values(by=['PO_Number', 'Product_ID', 'Order_Date', 'Received_Date'])
+            
+            # [แก้ไขจุดสำคัญ] Sort by Order Date (Past -> Present)
+            # เรียง: วันที่สั่งซื้อ -> เลข PO -> รหัสสินค้า -> วันที่รับ
+            df_final = df_final.sort_values(
+                by=['Order_Date', 'PO_Number', 'Product_ID', 'Received_Date'], 
+                ascending=[True, True, True, True]
+            )
 
             def calc_wait(row):
                 if pd.notna(row['Received_Date']) and pd.notna(row['Order_Date']):
@@ -1248,13 +1254,13 @@ with tab2:
                 if pd.isna(d) or str(d) == 'NaT': return "-"
                 return d.strftime("%d/%m/%Y")
 
+            # Grouping จะรักษาลำดับตามที่เรา Sort ไว้ (Order Date มาก่อน)
             grouped = df_final.groupby(['PO_Number', 'Product_ID'], sort=False)
 
             for group_idx, ((po, pid), group) in enumerate(grouped):
                 row_count = len(group)
                 
-                # [แก้ไข] คำนวณยอดสั่งซื้อรวมของกลุ่มนี้ (Sum Qty Ordered)
-                # เพื่อให้ได้ยอด Total จริงๆ ไม่ว่าจะถูก split เป็นกี่แถว
+                # คำนวณยอดสั่งซื้อรวมของกลุ่มนี้
                 total_order_qty = group['Qty_Ordered'].sum()
 
                 # สลับสีพื้นหลัง
@@ -1268,7 +1274,6 @@ with tab2:
                         img_src = row.get('Image', '')
                         img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
                         
-                        # คำนวณราคาเฉลี่ยต่อชิ้น (จากยอดรวม)
                         try: price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                         except: price_unit_thb = 0
                         try: price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
@@ -1290,14 +1295,11 @@ with tab2:
                     table_html += f'<td>{wait_show}</td>'
                     
                     # --- [Qty Ordered] แสดงยอดรวม (Merged) ---
-                    # แสดงเฉพาะแถวแรก และใช้ค่า total_order_qty ที่ Sum มาแล้ว
                     if idx == 0:
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{int(total_order_qty):,}</td>'
 
                     # --- [Qty Received] แสดงแยกตามจริง ---
                     qty_recv = int(row.get('Qty_Received', 0))
-                    # เช็คยอดรับเกิน/ขาด (เทียบกับ row นั้นๆ หรือจะเทียบ Total ก็ได้ แต่เทียบ row ปลอดภัยกว่าสำหรับสี)
-                    # แต่ถ้าอยากเน้นแค่ยอดรับ > 0 ให้สีแดงถ้าไม่เท่ากับ order ของ row นั้น
                     qty_row_ord = int(row.get('Qty_Ordered', 0))
                     q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_row_ord) else ""
                     table_html += f'<td style="{q_style} font-weight:bold;">{qty_recv:,}</td>'
@@ -1316,13 +1318,12 @@ with tab2:
                         shop_t = fmt_num(row.get('TikTok_Price', 0))
                         note = row.get('Note', '')
                         
-                        # Links
                         link = row.get('Link', '')
                         wechat = row.get('WeChat', '')
                         
                         link_html = f'<a href="{link}" target="_blank" class="table-link">🔗</a>' if link else '-'
-                        # [NEW] WeChat เป็น Link
                         wechat_html = f'<a href="{wechat}" target="_blank" class="table-link">💬</a>' if wechat else '-'
+                        
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_yuan}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_thb}</td>'
