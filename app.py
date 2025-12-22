@@ -1034,12 +1034,10 @@ with tab2:
                         <th>เลข PO</th>
                         <th>ขนส่ง</th>
                         <th>วันที่สั่งซื้อ</th>
-                        
                         <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
                         <th style="background-color: #2c3e50;">ระยะเวลา</th>
                         <th style="background-color: #2c3e50;">จำนวนสั่งซื้อ</th>
                         <th style="background-color: #2c3e50;">จำนวนที่ได้รับ</th>
-                        
                         <th>ราคา/ชิ้น</th>
                         <th>ราคา (หยวน)</th>
                         <th>ราคา (บาท)</th>
