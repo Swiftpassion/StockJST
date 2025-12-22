@@ -61,7 +61,7 @@ def get_credentials():
     return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
 # ==========================================
-# 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
+# 3. ฟังก์ชันจัดการข้อมูล (Data Functions) - ฉบับสมบูรณ์
 # ==========================================
 
 def highlight_negative(val):
@@ -70,6 +70,7 @@ def highlight_negative(val):
             return 'color: #ff4b4b; font-weight: bold;'
     return ''
 
+# 1. ฟังก์ชันอ่านข้อมูล PO (รองรับคอลัมน์ 'จำนวนที่ได้รับ')
 @st.cache_data(ttl=300)
 def get_po_data():
     try:
@@ -80,12 +81,12 @@ def get_po_data():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- Map ชื่อคอลัมน์ (เพิ่ม 'จำนวนที่ได้รับ') ---
+        # --- Map ชื่อคอลัมน์ (ภาษาไทย -> ตัวแปรระบบ) ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
             'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 
-            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order)
-            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) [NEW]
+            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order) - คอลัมน์ F
+            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) - คอลัมน์ G (ใหม่)
             'ราคา/ชิ้น': 'Price_Unit_NoVAT', 'ราคา (หยวน)': 'Total_Yuan', 'เรทเงิน': 'Yuan_Rate',
             'เรทค่าขนส่ง': 'Ship_Rate', 'ขนาด (คิว)': 'CBM', 'ค่าส่ง': 'Ship_Cost', 'น้ำหนัก / KG': 'Transport_Weight',
             'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
@@ -100,59 +101,68 @@ def get_po_data():
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
+            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0 (กัน Error)
             if 'Qty_Received' not in df.columns:
                 df['Qty_Received'] = 0
+            
+            # แปลงรหัสสินค้าเป็น String
+            if 'Product_ID' in df.columns:
+                df['Product_ID'] = df['Product_ID'].astype(str)
                  
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
         return pd.DataFrame()
 
+# 2. ฟังก์ชันอ่าน Master Stock (ที่หายไปจนทำให้เกิด Error)
 @st.cache_data(ttl=300)
-def get_po_data():
+def get_stock_from_sheet():
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
-        ws = sh.worksheet(TAB_NAME_PO)
+        ws = sh.worksheet(TAB_NAME_STOCK) # อ่านจาก Tab "MASTER"
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ ---
+        # Map ชื่อคอลัมน์ (ต้องตรงกับหัวข้อใน Google Sheet หน้า MASTER)
         col_map = {
-            'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
-            'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 
-            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order)
-            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) - [NEW]
-            'ราคา/ชิ้น': 'Price_Unit_NoVAT', 'ราคา (หยวน)': 'Total_Yuan', 'เรทเงิน': 'Yuan_Rate',
-            'เรทค่าขนส่ง': 'Ship_Rate', 'ขนาด (คิว)': 'CBM', 'ค่าส่ง': 'Ship_Cost', 'น้ำหนัก / KG': 'Transport_Weight',
-            'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
-            'ราคา (บาท)': 'Total_THB', 'Link_Shop': 'Link', 'WeChat': 'WeChat'
+            'รหัสสินค้า': 'Product_ID', 
+            'รหัส': 'Product_ID', # เผื่อใช้คำสั้น
+            'ชื่อสินค้า': 'Product_Name', 
+            'รูป': 'Image', 
+            'หมวดหมู่': 'Product_Type',
+            'ประเภท': 'Product_Type',
+            'Stock': 'Initial_Stock',       
+            'จำนวน': 'Initial_Stock',       
+            'ยกมา': 'Initial_Stock',
+            'Min_Limit': 'Min_Limit'
         }
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
 
         if not df.empty:
-            df['Sheet_Row_Index'] = range(2, len(df) + 2)
-            # แปลงตัวเลขให้ชัวร์
-            for col in ['Qty_Ordered', 'Qty_Received', 'Total_Yuan', 'Yuan_Rate']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
-            if 'Qty_Received' not in df.columns:
-                df['Qty_Received'] = 0
-                 
+            # แปลงค่าตัวเลข
+            if 'Initial_Stock' in df.columns:
+                df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0)
+            else:
+                df['Initial_Stock'] = 0 
+
+            # แปลงรหัสสินค้าเป็น String
+            if 'Product_ID' in df.columns:
+                df['Product_ID'] = df['Product_ID'].astype(str)
+
         return df
     except Exception as e:
-        st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
+        st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
         return pd.DataFrame()
 
+# 3. ฟังก์ชันอ่านยอดขายจาก Folder
 @st.cache_data(ttl=300)
 def get_sale_from_folder():
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
+        # อ่านไฟล์ใน Folder
         results = service.files().list(q=f"'{FOLDER_ID_DATA_SALE}' in parents and trashed=false", orderBy='modifiedTime desc', pageSize=100, fields="files(id, name)").execute()
         items = results.get('files', [])
         if not items: return pd.DataFrame()
@@ -177,6 +187,10 @@ def get_sale_from_folder():
                     temp_df['Order_Time'] = pd.to_datetime(temp_df['Order_Time'], errors='coerce')
                     temp_df['Date_Only'] = temp_df['Order_Time'].dt.date
                 
+                # แปลงรหัสสินค้าเป็น String
+                if 'Product_ID' in temp_df.columns:
+                    temp_df['Product_ID'] = temp_df['Product_ID'].astype(str)
+
                 if not temp_df.empty: all_dfs.append(temp_df)
             except: continue
 
@@ -200,6 +214,7 @@ def save_po_edit_split(row_index, current_row_data, new_row_data):
             elif item is None: formatted_curr.append("")
             else: formatted_curr.append(item)
         
+        # แก้ไขเป็น W (23 Columns)
         range_name = f"A{row_index}:W{row_index}" 
         ws.update(range_name, [formatted_curr])
         
@@ -217,6 +232,8 @@ def save_po_edit_split(row_index, current_row_data, new_row_data):
     except Exception as e:
         st.error(f"❌ บันทึก Split ไม่สำเร็จ: {e}")
         return False
+
+# --- ฟังก์ชันบันทึกแบบ Update (ทับแถวเดิม) ---
 def save_po_edit_update(row_index, current_row_data):
     try:
         creds = get_credentials()
@@ -224,7 +241,6 @@ def save_po_edit_update(row_index, current_row_data):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # จัดรูปแบบข้อมูลให้เป็น String หรือค่าว่าง ก่อนบันทึก
         formatted_curr = []
         for item in current_row_data:
             if isinstance(item, (date, datetime)): 
@@ -234,7 +250,7 @@ def save_po_edit_update(row_index, current_row_data):
             else: 
                 formatted_curr.append(item)
         
-        # Update ข้อมูลทับแถวเดิม (A ถึง W)
+        # แก้ไขเป็น W (23 Columns)
         range_name = f"A{row_index}:W{row_index}" 
         ws.update(range_name, [formatted_curr])
         
@@ -244,7 +260,7 @@ def save_po_edit_update(row_index, current_row_data):
         st.error(f"❌ บันทึก Update ไม่สำเร็จ: {e}")
         return False
 
-# --- [NEW] ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
+# --- ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
 def save_po_batch_to_sheet(rows_data):
     try:
         creds = get_credentials()
@@ -252,7 +268,6 @@ def save_po_batch_to_sheet(rows_data):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
         
-        # Append rows (22 Columns structure)
         ws.append_rows(rows_data)
         st.cache_data.clear() 
         return True
