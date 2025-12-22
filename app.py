@@ -1016,12 +1016,10 @@ with tab2:
                         <th>เลข PO</th>
                         <th>ขนส่ง</th>
                         <th>วันที่สั่งซื้อ</th>
-                        
                         <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
                         <th style="background-color: #2c3e50;">ระยะเวลา</th>
                         <th style="background-color: #2c3e50;">จำนวนสั่งซื้อ</th>
                         <th style="background-color: #2c3e50;">จำนวนที่ได้รับ</th>
-                        
                         <th>ราคา/ชิ้น</th>
                         <th>ราคา (หยวน)</th>
                         <th>ราคา (บาท)</th>
@@ -1114,7 +1112,6 @@ with tab2:
                         link = row.get('Link', '')
                         wechat = row.get('WeChat', '')
                         link_html = f'<a href="{link}" target="_blank">🔗</a>' if link else '-'
-                        
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_yuan}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{p_thb}</td>'
