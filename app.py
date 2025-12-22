@@ -881,14 +881,11 @@ with tab2:
         # --- 1. เตรียมข้อมูล ---
         df_po_filter = df_po.copy()
         
-        # แปลงวันที่ให้เป็น datetime เพื่อใช้คำนวณและกรอง
         if 'Order_Date' in df_po_filter.columns:
             df_po_filter['Order_Date'] = pd.to_datetime(df_po_filter['Order_Date'], errors='coerce')
         if 'Received_Date' in df_po_filter.columns:
-            # แปลงวันที่รับ ถ้าเป็น NaT หรือ ว่าง ให้เป็น None
             df_po_filter['Received_Date'] = pd.to_datetime(df_po_filter['Received_Date'], errors='coerce')
 
-        # Merge กับ Master เพื่อเอารูปและชื่อ
         df_po_filter['Product_ID'] = df_po_filter['Product_ID'].astype(str)
         df_master['Product_ID'] = df_master['Product_ID'].astype(str)
         
@@ -900,7 +897,6 @@ with tab2:
         with st.container(border=True):
             st.markdown("##### 🔍 ตัวกรองรายการสั่งซื้อ")
             
-            # Filter Date Logic
             def update_po_dates():
                 y = st.session_state.po_y
                 m_index = thai_months.index(st.session_state.po_m) + 1
@@ -934,20 +930,15 @@ with tab2:
                 sel_skus_po = st.multiselect("รายการที่เลือก:", sku_opts, key="po_sku_filter")
 
         # --- 3. Apply Filters ---
-        # Date Filter
         mask_date = (df_display['Order_Date'].dt.date >= st.session_state.po_d_start) & \
                     (df_display['Order_Date'].dt.date <= st.session_state.po_d_end)
         df_final = df_display[mask_date].copy()
 
-        # Status Filter
         if sel_status == "รอจัดส่งสินค้า":
-            # ยังไม่มีวันที่รับ หรือ วันที่รับเป็น NaT
             df_final = df_final[df_final['Received_Date'].isna()]
         elif sel_status == "ได้รับสินค้าครบแล้ว":
-            # มีวันที่รับแล้ว
             df_final = df_final[df_final['Received_Date'].notna()]
 
-        # Category & SKU Filter
         if sel_cat_po != "แสดงทั้งหมด": df_final = df_final[df_final['Product_Type'] == sel_cat_po]
         if sel_skus_po:
             selected_ids = [s.split(" : ")[0] for s in sel_skus_po]
@@ -955,18 +946,14 @@ with tab2:
 
         # --- 4. Render Custom HTML Table ---
         if not df_final.empty:
-            
-            # Sort ข้อมูลเพื่อให้ Grouping ทำงานได้ถูกต้อง (เรียงตาม PO -> Product -> วันที่รับ)
             df_final = df_final.sort_values(by=['PO_Number', 'Product_ID', 'Order_Date', 'Received_Date'])
 
-            # คำนวณระยะเวลารอคอย (Wait Days)
             def calc_wait(row):
                 if pd.notna(row['Received_Date']) and pd.notna(row['Order_Date']):
                     return (row['Received_Date'] - row['Order_Date']).days
                 return "-"
             df_final['Calc_Wait'] = df_final.apply(calc_wait, axis=1)
 
-            # CSS Styles
             st.markdown("""
             <style>
                 .po-table-container {
@@ -977,13 +964,12 @@ with tab2:
                 }
                 .custom-po-table {
                     width: 100%;
-                    border-collapse: separate; /* เพื่อให้ sticky header ทำงานได้ดีกับ border */
+                    border-collapse: separate; 
                     border-spacing: 0;
                     font-family: 'Sarabun', sans-serif;
                     font-size: 13px;
                     color: #e0e0e0;
-                    background-color: #1a1a1a;
-                    min-width: 1800px; /* บังคับความกว้างขั้นต่ำเพื่อให้ scroll แนวนอน */
+                    min-width: 1800px; 
                 }
                 .custom-po-table th {
                     background-color: #1e3c72;
@@ -1000,17 +986,14 @@ with tab2:
                 }
                 .custom-po-table td {
                     padding: 8px 5px;
-                    border-bottom: 1px solid #333;
-                    border-right: 1px solid #333;
+                    border-bottom: 1px solid #111; /* เส้นขอบให้กลืนไปกับพื้นหลัง */
+                    border-right: 1px solid #444;
                     vertical-align: middle;
-                    text-align: center; /* Default Center */
+                    text-align: center; 
                 }
-                .custom-po-table tr:hover td {
-                    background-color: #2d2d2d;
-                }
+                /* ลบ background-color: #222 ออกจาก td-merged เพื่อให้สีจาก tr แสดงผล */
                 .td-merged {
-                    background-color: #222; /* สีพื้นหลังช่องที่ถูก Merge */
-                    border-right: 2px solid #555 !important; /* เส้นแบ่งกลุ่ม */
+                    border-right: 2px solid #666 !important; 
                 }
                 .td-img img {
                     border-radius: 4px;
@@ -1023,7 +1006,6 @@ with tab2:
             </style>
             """, unsafe_allow_html=True)
 
-            # Header HTML
             table_html = """
             <div class="po-table-container">
             <table class="custom-po-table">
@@ -1034,10 +1016,12 @@ with tab2:
                         <th>เลข PO</th>
                         <th>ขนส่ง</th>
                         <th>วันที่สั่งซื้อ</th>
+                        
                         <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
                         <th style="background-color: #2c3e50;">ระยะเวลา</th>
                         <th style="background-color: #2c3e50;">จำนวนสั่งซื้อ</th>
                         <th style="background-color: #2c3e50;">จำนวนที่ได้รับ</th>
+                        
                         <th>ราคา/ชิ้น</th>
                         <th>ราคา (หยวน)</th>
                         <th>ราคา (บาท)</th>
@@ -1058,7 +1042,6 @@ with tab2:
                 <tbody>
             """
 
-            # Helper Function เพื่อจัดการค่า None/NaN
             def fmt_num(val, decimals=2):
                 try:
                     v = float(val)
@@ -1070,30 +1053,26 @@ with tab2:
                 if pd.isna(d) or str(d) == 'NaT': return "-"
                 return d.strftime("%d/%m/%Y")
 
-            # Logic Grouping & Rowspan
-            # เราจะ Group ตาม (PO_Number, Product_ID)
             grouped = df_final.groupby(['PO_Number', 'Product_ID'], sort=False)
 
-            for (po, pid), group in grouped:
-                row_count = len(group) # จำนวนแถวในกลุ่มนี้ (เพื่อทำ rowspan)
+            # ใช้ enumerate เพื่อเช็คลำดับคู่/คี่ สำหรับสลับสี
+            for group_idx, ((po, pid), group) in enumerate(grouped):
+                row_count = len(group)
                 
-                # Iterate แต่ละแถวในกลุ่ม
+                # กำหนดสีพื้นหลัง: คู่=สีเข้ม(#222), คี่=สีอ่อน(#2e2e2e)
+                bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
+                
                 for idx, (i, row) in enumerate(group.iterrows()):
-                    table_html += "<tr>"
+                    # ใส่สีพื้นหลังที่ <tr> เพื่อให้คลุมทั้งแถว
+                    table_html += f'<tr style="background-color: {bg_color};">'
                     
-                    # --- Common Columns (แสดงครั้งเดียวโดยใช้ rowspan) ---
                     if idx == 0:
                         img_src = row.get('Image', '')
                         img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
                         
-                        # คำนวณราคา/ชิ้น (บาท)
-                        try:
-                            price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
+                        try: price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                         except: price_unit_thb = 0
-
-                        # คำนวณราคา/ชิ้น (หยวน)
-                        try:
-                            price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
+                        try: price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                         except: price_unit_yuan = 0
 
                         table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
@@ -1102,47 +1081,38 @@ with tab2:
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
                     
-                    # --- Specific Columns (แสดงทุกแถว เพราะเป็นรายละเอียดการส่ง) ---
-                    # วันที่ได้รับ
                     recv_d = fmt_date(row['Received_Date'])
                     status_cls = "status-done" if recv_d != "-" else "status-waiting"
                     table_html += f'<td class="{status_cls}">{recv_d}</td>'
                     
-                    # ระยะเวลา
                     wait_val = row['Calc_Wait']
                     wait_show = f"{wait_val} วัน" if wait_val != "-" else "-"
                     table_html += f'<td>{wait_show}</td>'
                     
-                    # จำนวน (สั่ง / รับ)
                     qty_ord = int(row.get('Qty_Ordered', 0))
                     qty_recv = int(row.get('Qty_Received', 0))
-                    
-                    # ไฮไลท์ถ้าของขาด/เกิน
                     q_style = "color: #ff4b4b;" if (qty_recv > 0 and qty_recv != qty_ord) else ""
                     
                     table_html += f'<td>{qty_ord:,}</td>'
                     table_html += f'<td style="{q_style} font-weight:bold;">{qty_recv:,}</td>'
 
-                    # --- Common Columns (Pricing & Details) - แสดงเฉพาะแถวแรกแบบ Merged ---
                     if idx == 0:
-                        # เตรียมตัวแปร
                         p_yuan = fmt_num(row.get('Total_Yuan', 0))
                         p_thb = fmt_num(row.get('Total_THB', 0))
                         rate = fmt_num(row.get('Yuan_Rate', 0))
                         ship_rate = fmt_num(row.get('Ship_Rate', 0))
-                        cbm = fmt_num(row.get('CBM', 0), 4) # 4 ตำแหน่ง
+                        
+                        # [แก้ไข] ปรับ CBM เป็น 2 ตำแหน่ง
+                        cbm = fmt_num(row.get('CBM', 0), 2) 
+                        
                         ship_cost = fmt_num(row.get('Ship_Cost', 0))
                         weight = fmt_num(row.get('Transport_Weight', 0))
-                        
                         shop_s = fmt_num(row.get('Shopee_Price', 0))
                         shop_l = fmt_num(row.get('Lazada_Price', 0))
                         shop_t = fmt_num(row.get('TikTok_Price', 0))
-                        
                         note = row.get('Note', '')
                         link = row.get('Link', '')
                         wechat = row.get('WeChat', '')
-                        
-                        # สร้าง Link 
                         link_html = f'<a href="{link}" target="_blank">🔗</a>' if link else '-'
                         
                         table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
@@ -1164,8 +1134,6 @@ with tab2:
                     table_html += "</tr>"
 
             table_html += "</tbody></table></div>"
-            
-            # Render HTML
             st.markdown(table_html, unsafe_allow_html=True)
 
         else: st.warning("⚠️ ไม่พบรายการ (ลองเปลี่ยนตัวกรองวันที่ หรือ สถานะ)")
