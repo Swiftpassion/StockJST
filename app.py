@@ -207,6 +207,32 @@ def save_po_edit_split(row_index, current_row_data, new_row_data):
     except Exception as e:
         st.error(f"❌ บันทึก Split ไม่สำเร็จ: {e}")
         return False
+def save_po_edit_update(row_index, current_row_data):
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_PO)
+        
+        # จัดรูปแบบข้อมูลให้เป็น String หรือค่าว่าง ก่อนบันทึก
+        formatted_curr = []
+        for item in current_row_data:
+            if isinstance(item, (date, datetime)): 
+                formatted_curr.append(item.strftime("%Y-%m-%d"))
+            elif item is None: 
+                formatted_curr.append("")
+            else: 
+                formatted_curr.append(item)
+        
+        # Update ข้อมูลทับแถวเดิม (A ถึง V)
+        range_name = f"A{row_index}:V{row_index}" 
+        ws.update(range_name, [formatted_curr])
+        
+        st.cache_data.clear() 
+        return True
+    except Exception as e:
+        st.error(f"❌ บันทึก Update ไม่สำเร็จ: {e}")
+        return False
 
 # --- [NEW] ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
 def save_po_batch_to_sheet(rows_data):
@@ -473,63 +499,81 @@ def po_edit_dialog_v2():
         </div>
         """, unsafe_allow_html=True)
 
-        if st.button("💾 บันทึกรับของ", type="primary"):
-            # -------------------------------------------------------
-            # [FIX] 1. Define the missing variables first
-            # -------------------------------------------------------
-            e_ord_date = d_ord  # Use the date calculated earlier at line 405
+        if st.button("💾 บันทึกรับของ (สร้างประวัติใหม่)", type="primary"):
+            # 1. เตรียมตัวแปร
+            e_ord_date = d_ord 
             e_po = get_val('PO_Number', '')
             e_trans = get_val('Transport_Type', '')
-            # -------------------------------------------------------
 
-            recv_str = e_recv_date.strftime("%Y-%m-%d")
+            # 2. คำนวณยอด
+            # ยอดรับจริง (รายการใหม่ที่จะสร้าง)
+            qty_received = e_qty_received
+            yuan_received = (total_yuan_original / original_qty) * qty_received if original_qty > 0 else 0
             
-            # Now this line will work because e_ord_date is defined
-            wait_days = (e_recv_date - e_ord_date).days 
+            # ยอดคงเหลือ (ที่จะอัปเดตแถวเดิม)
+            qty_remaining = original_qty - qty_received
+            yuan_remaining = total_yuan_original - yuan_received
             
-            final_unit_thb = calc_unit_cost
-            final_total_thb = calc_total_thb
-            final_unit_yuan = final_calc_yuan / e_qty_received if e_qty_received > 0 else 0
+            # คำนวณค่า CBM/Weight สำหรับยอดรับ
+            # (ถ้า User ไม่ได้แก้ e_cbm ระบบจะ Pro-rate ให้ตามสัดส่วน)
+            if e_cbm == float(get_val('CBM', 0)): # ถ้าค่าเท่าเดิม แสดงว่า User ไม่ได้แก้
+                 cbm_received = (float(get_val('CBM', 0)) / original_qty) * qty_received
+            else:
+                 cbm_received = e_cbm # ใช้ค่าที่ User กรอก
+            
+            cbm_remaining = float(get_val('CBM', 0)) - cbm_received
+            if cbm_remaining < 0: cbm_remaining = 0
 
-            # Data แถวปัจจุบัน (รับของ)
-            current_row_data = [
-                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, e_recv_date, wait_days, 
-                e_qty_received, final_unit_thb, round(final_calc_yuan,2), round(final_total_thb,2), 
-                e_rate, e_ship_rate, e_cbm, calc_ship_cost, e_weight, 
-                round(final_unit_yuan,4), get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
+            # คำนวณบาท
+            total_thb_received = (yuan_received * e_rate) + (cbm_received * e_ship_rate)
+            unit_cost_received = total_thb_received / qty_received if qty_received > 0 else 0
+            
+            # --- เตรียมข้อมูล 2 ชุด ---
+            
+            # ชุด A: แถวเดิม (ให้กลายเป็นยอดค้างส่ง / หรือปิดจ็อบหากเหลือ 0)
+            # เราจะรักษา Order Date เดิมไว้ แต่ลบวันที่รับออก (เพราะมันยังรออยู่)
+            note_remaining = f"รอรับส่วนที่เหลือ ({qty_remaining})" if qty_remaining > 0 else "✅ ปิดรายการ (รับครบแล้ว)"
+            
+            data_remaining_update = [
+                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, 
+                None, # วันที่รับ (ว่างไว้ เพราะคือยอดรอ)
+                0,    # จำนวนวันรอ (0 เพราะยังไม่รับ)
+                qty_remaining, # *จำนวนที่เหลือ*
+                0, # ราคาต่อหน่วย (ไม่ต้องแสดงของยอดรอ)
+                round(yuan_remaining, 2), 
+                0, # Total THB (รอคำนวณเมื่อรับจริง)
+                e_rate, e_ship_rate, round(cbm_remaining, 4), 0, e_weight, 
+                0, get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
+                note_remaining, e_link, e_wechat
+            ]
+
+            # ชุด B: แถวใหม่ (History Log ของการรับของรอบนี้)
+            # อันนี้จะไปต่อท้าย Database
+            recv_date_str = e_recv_date
+            wait_days = (e_recv_date - e_ord_date).days
+            
+            data_received_log = [
+                get_val('Product_ID', ''), e_po, e_trans, e_ord_date, 
+                recv_date_str, # วันที่รับจริง
+                wait_days,
+                qty_received, # *จำนวนที่รับรอบนี้*
+                unit_cost_received,
+                round(yuan_received, 2),
+                round(total_thb_received, 2),
+                e_rate, e_ship_rate, round(cbm_received, 4), round(cbm_received*e_ship_rate, 2), e_weight,
+                round(yuan_received/qty_received, 4) if qty_received else 0,
+                get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
                 e_note, e_link, e_wechat
             ]
-            
-            success = False
-            
-            if remaining_qty > 0:
-                # Data ยอดค้าง (สร้างใหม่)
-                rem_yuan = total_yuan_original - final_calc_yuan
-                if rem_yuan < 0: rem_yuan = 0
-                
-                original_cbm = float(get_val('CBM', 0))
-                rem_cbm = original_cbm - e_cbm
-                if rem_cbm < 0: rem_cbm = 0
-                
-                rem_total_thb = rem_yuan * e_rate
-                rem_ship_cost = rem_cbm * e_ship_rate
-                
-                new_row_data = [
-                    get_val('Product_ID', ''), e_po, e_trans, e_ord_date, None, 0, 
-                    remaining_qty, final_unit_thb, round(rem_yuan, 2), round(rem_total_thb, 2), 
-                    e_rate, e_ship_rate, round(rem_cbm, 4), round(rem_ship_cost, 2), 0, 
-                    final_unit_yuan, get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
-                    f"รอรับส่วนที่เหลือ ({remaining_qty})", e_link, e_wechat
-                ]
-                
-                success = save_po_edit_split(row_index, current_row_data, new_row_data)
-                if success: st.success(f"✅ บันทึกรับ {e_qty_received} / ค้าง {remaining_qty} เรียบร้อย!")
-            
-            else:
-                success = save_po_edit_update(row_index, current_row_data)
-                if success: st.success(f"✅ บันทึกรับครบ {e_qty_received} ชิ้น เรียบร้อย!")
 
+            # 3. บันทึกข้อมูล (ใช้ฟังก์ชัน Split เดิมได้เลย แต่สลับข้อมูล)
+            # logic เดิม: update(current), append(new)
+            # logic ใหม่: update(ยอดรอ), append(ยอดรับ) -> ทำให้ยอดรับไปอยู่บรรทัดล่างสุดเสมอ
+            
+            success = save_po_edit_split(row_index, data_remaining_update, data_received_log)
+            
             if success:
+                st.success(f"✅ บันทึกรับของ {qty_received} ชิ้น ลงท้ายตารางเรียบร้อยแล้ว!")
                 st.session_state.active_dialog = None
                 time.sleep(1)
                 st.rerun()
