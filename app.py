@@ -532,12 +532,15 @@ def po_edit_dialog_v2():
 def po_batch_dialog():
     st.caption("💡 กรอกข้อมูลสินค้า -> กดเพิ่มลงตระกร้า -> กดบันทึก (รายการจะถูกบันทึกเป็น 'รอรับของ')")
 
+    # --- 0. ส่วนจัดการ Reset ค่า ---
     if st.session_state.get("need_reset_inputs", False):
-        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", "bp_note"]
+        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", "bp_note", "bp_shop_s", "bp_shop_l", "bp_shop_t"]
         for key in keys_to_reset:
-            if key in st.session_state: del st.session_state[key]
+            if key in st.session_state:
+                del st.session_state[key]
         st.session_state["need_reset_inputs"] = False
 
+    # --- 1. Header (ข้อมูลเอกสาร) ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
@@ -545,6 +548,7 @@ def po_batch_dialog():
         transport_type = c2.selectbox("การขนส่ง", ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"], key="bp_trans")
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
 
+    # --- 2. ข้อมูลสินค้า ---
     with st.container(border=True):
         st.subheader("2. รายละเอียดสินค้า")
         prod_list = []
@@ -566,15 +570,17 @@ def po_batch_dialog():
             else: st.markdown('<div style="background:#333;height:120px;border-radius:8px;"></div>', unsafe_allow_html=True)
         
         with col_input:
+            # ใช้ value=None เพื่อให้ช่องว่าง ไม่ต้องลบเลข 0
             r1c1, r1c2, r1c3 = st.columns(3)
-            total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=100, key="bp_qty")
-            cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, key="bp_cost_yuan")
-            rate_money = r1c3.number_input("เรทเงิน (หยวน)", min_value=0.0, step=0.01, value=5.0, key="bp_rate")
+            total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="0", key="bp_qty")
+            cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, value=None, format="%.2f", placeholder="0.00", key="bp_cost_yuan")
+            rate_money = r1c3.number_input("เรทเงิน (หยวน)", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="bp_rate") # เรทเงินมักจะคงที่ ใส่ 5.0 ไว้ช่วยอำนวยความสะดวก
 
             r2c1, r2c2, r2c3 = st.columns(3)
-            cbm_val = r2c1.number_input("ขนาด (คิว) ", min_value=0.0, format="%.4f", key="bp_cbm")
-            ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, value=5000.0, key="bp_ship_rate")
-            weight_val = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, key="bp_weight")
+            # CBM ขอคง 4 ตำแหน่งไว้เผื่อคำนวณละเอียด แต่ถ้าต้องการ 2 จริงๆ แก้ format="%.2f" ได้เลย
+            cbm_val = r2c1.number_input("ขนาด (คิว) ", min_value=0.0, step=0.0001, value=None, format="%.4f", placeholder="0.0000", key="bp_cbm")
+            ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, format="%.2f", placeholder="0.00", key="bp_ship_rate")
+            weight_val = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, step=0.1, value=None, format="%.2f", placeholder="0.00", key="bp_weight")
             
             is_cbm_per_piece = st.checkbox("ขนาด(คิว) 'ต่อชิ้น' (ไม่ติ๊ก=รวม)", value=False)
             st.markdown("---")
@@ -585,40 +591,82 @@ def po_batch_dialog():
                 link_shop = x1.text_input("Link", key="bp_link")
                 wechat = x2.text_input("WeChat", key="bp_wechat")
                 m1, m2, m3 = st.columns(3)
-                p_shopee = m1.number_input("Shopee", value=0, key="bp_shop_s")
-                p_lazada = m2.number_input("Lazada", value=0, key="bp_shop_l")
-                p_tiktok = m3.number_input("TikTok", value=0, key="bp_shop_t")
+                p_shopee = m1.number_input("Shopee", value=None, placeholder="0.00", key="bp_shop_s")
+                p_lazada = m2.number_input("Lazada", value=None, placeholder="0.00", key="bp_shop_l")
+                p_tiktok = m3.number_input("TikTok", value=None, placeholder="0.00", key="bp_shop_t")
 
     st.divider()
+    # ปุ่มจะกดได้เมื่อมีเลข PO และ เลือกสินค้าแล้ว
     btn_disabled = (not po_number) or (not sel_prod)
 
     if st.button("➕ เพิ่มรายการลงตระกร้า", type="primary", disabled=btn_disabled):
-        unit_yuan = cost_yuan / total_qty if total_qty > 0 else 0
-        total_cbm = cbm_val * total_qty if is_cbm_per_piece else cbm_val
-        total_ship_cost = total_cbm * ship_rate
-        total_thb = (cost_yuan * rate_money) 
-        unit_thb_final = ((total_thb) + total_ship_cost) / total_qty if total_qty > 0 else 0
+        # 1. จัดการค่า None ให้เป็น 0 เพื่อคำนวณ (Safety Check)
+        c_qty = total_qty if total_qty is not None else 0
+        c_cost_yuan = cost_yuan if cost_yuan is not None else 0.0
+        c_rate = rate_money if rate_money is not None else 0.0
+        c_cbm = cbm_val if cbm_val is not None else 0.0
+        c_ship_rate = ship_rate if ship_rate is not None else 0.0
+        c_weight = weight_val if weight_val is not None else 0.0
+        
+        # 2. คำนวณ
+        unit_yuan = c_cost_yuan / c_qty if c_qty > 0 else 0
+        
+        if is_cbm_per_piece:
+            total_cbm = c_cbm * c_qty
+        else:
+            total_cbm = c_cbm
+        
+        total_ship_cost = total_cbm * c_ship_rate
+        total_thb = (c_cost_yuan * c_rate) 
+        unit_thb_final = ((total_thb) + total_ship_cost) / c_qty if c_qty > 0 else 0
+
+        # ราคาขาย (จัดการ None)
+        s_price = p_shopee if p_shopee is not None else 0
+        l_price = p_lazada if p_lazada is not None else 0
+        t_price = p_tiktok if p_tiktok is not None else 0
 
         item = {
             "SKU": pid, "PO": po_number, "Trans": transport_type,
             "Ord": str(order_date), "Recv": "", "Wait": 0,
-            "Qty": int(total_qty), "UnitTHB": round(unit_thb_final, 2),
-            "TotYuan": round(cost_yuan, 2), "TotTHB": round(total_thb, 2), 
-            "Rate": rate_money, "ShipRate": ship_rate,
-            "CBM": round(total_cbm, 4), "ShipCost": round(total_ship_cost, 2), "W": weight_val, 
+            "Qty": int(c_qty), 
+            "UnitTHB": round(unit_thb_final, 2),
+            "TotYuan": round(c_cost_yuan, 2), 
+            "TotTHB": round(total_thb, 2), 
+            "Rate": c_rate, 
+            "ShipRate": c_ship_rate,
+            "CBM": round(total_cbm, 4), 
+            "ShipCost": round(total_ship_cost, 2), 
+            "W": c_weight, 
             "UnitYuan": round(unit_yuan, 4), 
-            "Shopee": p_shopee, "Laz": p_lazada, "Tik": p_tiktok, 
+            "Shopee": s_price, "Laz": l_price, "Tik": t_price, 
             "Note": po_note, "Link": link_shop, "WeChat": wechat
         }
         st.session_state.po_temp_cart.append(item)
         st.toast(f"✅ เพิ่ม {pid} ลงตระกร้าแล้ว", icon="🛒")
+        
+        # เปิด Flag Reset ค่า
         st.session_state["need_reset_inputs"] = True
         st.rerun()
 
+    # --- 3. ตระกร้า ---
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
-        st.dataframe(pd.DataFrame(st.session_state.po_temp_cart)[["SKU", "Qty", "TotYuan", "Note"]], use_container_width=True, hide_index=True)
+        
+        # สร้าง DataFrame แสดงผล
+        cart_df = pd.DataFrame(st.session_state.po_temp_cart)
+        
+        # กำหนด Column Config เพื่อบังคับทศนิยม 2 ตำแหน่ง
+        st.dataframe(
+            cart_df[["SKU", "Qty", "TotYuan", "UnitTHB", "Note"]], 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "TotYuan": st.column_config.NumberColumn("รวม (หยวน)", format="%.2f"),
+                "UnitTHB": st.column_config.NumberColumn("ต้นทุน/ชิ้น (บาท)", format="%.2f"),
+                "Qty": st.column_config.NumberColumn("จำนวน", format="%d"),
+            }
+        )
         
         c1, c2 = st.columns([1, 4])
         if c1.button("🗑️ ล้างตระกร้า"):
@@ -628,15 +676,14 @@ def po_batch_dialog():
         if c2.button("💾 บันทึก PO ทั้งหมด", type="primary"):
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
-                 # [STRUCT NEW: Add New Row] (Size 23 for A:W)
                  row = [
                      i["SKU"], i["PO"], i["Trans"], i["Ord"], 
                      i["Recv"], i["Wait"], 
-                     i["Qty"],  # Qty Ord
-                     0,         # Qty Recv
-                     0,         # Price/Unit
+                     i["Qty"],  
+                     0,         
+                     0,         
                      i["TotYuan"], 
-                     0,         # Total THB
+                     0,         
                      i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], 
                      i["UnitYuan"], 
                      i["Shopee"], i["Laz"], i["Tik"], 
