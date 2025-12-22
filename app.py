@@ -617,7 +617,7 @@ def po_batch_dialog():
             df_split_input,
             column_config={
                 "วันที่ได้รับ": st.column_config.DateColumn("วันที่ (เว้นว่าง=รอ)", format="YYYY-MM-DD"),
-                "จำนวนที่เข้า": st.column_config.NumberColumn("จำนวนที่เข้าจริง", min_value=0, required=True),
+                "จำนวนที่เข้า": st.column_config.NumberColumn("จำนวนสินค้ารอรับ", min_value=0, required=True),
                 "หมายเหตุ": st.column_config.TextColumn("หมายเหตุ", width="large")
             },
             num_rows="dynamic",
