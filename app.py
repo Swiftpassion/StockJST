@@ -1349,32 +1349,48 @@ with tab2:
     else: st.info("ยังไม่มีข้อมูล PO")
 
 # ==========================================
-# TAB 3: Stock Report
+# TAB 3: Stock Report (FIXED KeyError)
 # ==========================================
 with tab3:
     st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
+    
+    # เช็คว่ามีข้อมูล Master หรือไม่
     if not df_master.empty and 'Product_ID' in df_master.columns:
-        df_po_latest = pd.DataFrame()
+        
+        # --- [แก้ไขจุดที่ Error] ---
+        # เช็คก่อนว่ามีข้อมูล PO ไหม ถ้ามีค่อย Merge ถ้าไม่มีให้ข้าม
         if not df_po.empty and 'Product_ID' in df_po.columns:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
+            # Merge ตามปกติ
+            df_stock_report = pd.merge(df_master, df_po_latest, on='Product_ID', how='left')
+        else:
+            # กรณีไม่มีข้อมูล PO เลย (ตาราง PO ว่าง) ให้ใช้ Master เพียวๆ
+            df_stock_report = df_master.copy()
+            # เพิ่มคอลัมน์ PO_Number ว่างๆ ไว้ เพื่อไม่ให้ Code ข้างล่าง Error
+            df_stock_report['PO_Number'] = ""
+        # -------------------------------------------------------
         
-        df_stock_report = pd.merge(df_master, df_po_latest, on='Product_ID', how='left')
         total_sales_map = {}
         if not df_sale.empty and 'Product_ID' in df_sale.columns:
             total_sales_map = df_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
         
+        # คำนวณยอดขายและสต็อกคงเหลือ
         df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
         df_stock_report['Total_Sold_All'] = df_stock_report['Product_ID'].map(total_sales_map).fillna(0).astype(int)
+        
         if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
         df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
+        
         if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
         
+        # คำนวณสถานะ
         def calc_status(row):
             if row['Current_Stock'] <= 0: return "🔴 หมดเกลี้ยง"
             elif row['Current_Stock'] < row['Min_Limit']: return "⚠️ ใกล้หมด"
             return "🟢 มีของ"
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
+        # ส่วนแสดงผล UI
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
             with col_filter:
@@ -1385,6 +1401,8 @@ with tab3:
                 if st.button("❌ ล้าง", use_container_width=True): st.rerun()
 
         edit_df = df_stock_report.copy()
+        
+        # กรองข้อมูลตามสถานะและคำค้นหา
         if selected_status: edit_df = edit_df[edit_df['Status'].isin(selected_status)]
         if search_text:
             edit_df = edit_df[edit_df['Product_Name'].str.contains(search_text, case=False) | edit_df['Product_ID'].str.contains(search_text, case=False)]
@@ -1397,7 +1415,14 @@ with tab3:
                      update_master_limits(st.session_state.edited_stock_data)
                      st.rerun()
 
+        # แสดงตาราง Data Editor
         final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Recent_Sold", "Total_Sold_All", "PO_Number", "Status", "Min_Limit"]
+        
+        # เช็คให้แน่ใจว่า Column ที่จะโชว์มีครบ (กัน Error จุกจิก)
+        for c in final_cols:
+            if c not in edit_df.columns:
+                edit_df[c] = "" 
+
         st.data_editor(
             edit_df[final_cols],
             column_config={
@@ -1407,7 +1432,8 @@ with tab3:
             },
             height=1500, use_container_width=True, hide_index=True, key="edited_stock_data"
         )
-    else: st.warning("ไม่พบข้อมูล Master Product")
+    else: 
+        st.warning("ไม่พบข้อมูล Master Product")
 
 # ==========================================
 # 🛑 EXECUTE DIALOGS
