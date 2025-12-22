@@ -581,13 +581,13 @@ def po_batch_dialog():
             # กำหนด value=... เพื่อให้เวลา Reset กลับมาเป็นค่านี้
             total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=100, key="bp_qty")
             cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, key="bp_cost_yuan")
-            rate_money = r1c3.number_input("เรทเงิน (บาท/หยวน)", min_value=0.0, step=0.01, value=5.0, key="bp_rate")
+            rate_money = r1c3.number_input("เรทเงิน (หยวน)", min_value=0.0, step=0.01, value=5.0, key="bp_rate")
 
             r2c1, r2c2, r2c3 = st.columns(3)
-            cbm_val = r2c1.number_input("CBM", min_value=0.0, format="%.4f", key="bp_cbm")
+            cbm_val = r2c1.number_input("ขนาด (คิว) ", min_value=0.0, format="%.4f", key="bp_cbm")
             ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, value=5000.0, key="bp_ship_rate")
             weight_val = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, key="bp_weight")
-            is_cbm_per_piece = st.checkbox("CBM คือ 'ต่อชิ้น' (ไม่ติ๊ก=รวม)", value=False)
+            is_cbm_per_piece = st.checkbox("ขนาด(คิว) 'ต่อชิ้น' (ไม่ติ๊ก=รวม)", value=False)
 
             with st.expander("ข้อมูลเพิ่มเติม"):
                 x1, x2 = st.columns(2)
