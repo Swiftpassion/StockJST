@@ -372,29 +372,35 @@ def po_edit_dialog_v2():
 
         # --- ส่วนที่ 2: ฟอร์มแก้ไข ---
         with st.container(border=True):
-            st.subheader("1. ข้อมูลเอกสาร")
-            c1, c2, c3 = st.columns(3)
-            e_po = c1.text_input("เลข PO", value=get_val('PO_Number', ''), key="e_po")
+            # --- [เพิ่ม] ส่วนดึงข้อมูลล่าสุดจาก Master Stock ---
+            pid_current = str(get_val('Product_ID', '')).strip()
             
-            trans_opts = ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"]
-            curr_trans = get_val('Transport_Type', 'ทางรถ🚚')
-            t_idx = trans_opts.index(curr_trans) if curr_trans in trans_opts else 0
-            e_trans = c2.selectbox("การขนส่ง", trans_opts, index=t_idx, key="e_trans")
-            
-            e_ord_date = c3.date_input("วันที่สั่งซื้อ", value=d_ord, key="e_ord_date")
+            # ตั้งค่าเริ่มต้นเป็นค่าจาก PO เดิม
+            current_img = get_val('Image', '')
+            current_name = get_val('Product_Name', '')
 
-        with st.container(border=True):
+            # ถ้าเจอใน Master ให้ใช้ข้อมูลจาก Master แทน (เพื่อได้รูป/ชื่อล่าสุด)
+            if not df_master.empty:
+                match_row = df_master[df_master['Product_ID'] == pid_current]
+                if not match_row.empty:
+                    current_img = match_row.iloc[0].get('Image', current_img)
+                    current_name = match_row.iloc[0].get('Product_Name', current_name)
+            # --------------------------------------------------
+
             st.subheader(f"2. รายละเอียดสินค้า (ยอดปัจจุบัน: {original_qty} ชิ้น)")
             
             col_img, col_info = st.columns([1, 3])
             with col_img:
-                img_link = get_val('Image', '')
-                if img_link and str(img_link).startswith('http'): st.image(img_link, width=120)
-                else: st.info("No Image")
+                # ใช้ current_img ที่ดึงมาใหม่
+                if current_img and str(current_img).startswith('http'): 
+                    st.image(current_img, width=120)
+                else: 
+                    st.info("No Image")
             
             with col_info:
-                st.markdown(f"**รหัสสินค้า:** `{get_val('Product_ID','')}`")
-                st.markdown(f"**ชื่อสินค้า:** {get_val('Product_Name','')}")
+                st.markdown(f"**รหัสสินค้า:** `{pid_current}`")
+                # ใช้ current_name ที่ดึงมาใหม่
+                st.markdown(f"**ชื่อสินค้า:** {current_name}")
 
             st.divider()
             
@@ -408,11 +414,11 @@ def po_edit_dialog_v2():
                 e_qty_received = st.number_input("จำนวนที่รับ (ชิ้น)", min_value=1, max_value=original_qty, value=original_qty, key="e_qty")
             
             with r_col2:
-                # เพิ่มช่องวันที่รับของตรงนี้
+                # ช่องวันที่รับของ
                 e_recv_date = st.date_input("วันที่ได้รับของ", value=d_recv, key="e_recv_date")
 
             with r_col3:
-                # Auto Note
+                # Auto Note Logic
                 default_note = get_val('Note', '')
                 remaining_qty = original_qty - e_qty_received
                 if remaining_qty > 0 and not default_note:
@@ -437,7 +443,6 @@ def po_edit_dialog_v2():
                 
                 # CBM Logic
                 cbm_val = float(get_val('CBM', 0))
-                # Suggest CBM ตามสัดส่วน
                 suggested_cbm = (cbm_val / original_qty) * e_qty_received if original_qty > 0 else cbm_val
                 
                 m1, m2 = st.columns(2)
@@ -873,7 +878,7 @@ with tab1:
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
 # ==========================================
-# TAB 2: Purchase Orders (แก้ไขให้มี Filter + ปุ่ม Edit เดิม + ปุ่ม Add ใหม่)
+# TAB 2: Purchase Orders (แก้ไขข้อความตัวกรองสถานะ)
 # ==========================================
 with tab2:
     col_head, col_action = st.columns([4, 2])
@@ -881,10 +886,9 @@ with tab2:
     with col_action:
         b1, b2 = st.columns(2)
         with b1:
-            # เปลี่ยน logic เป็นการ set session_state
             if st.button("➕ เพิ่ม PO ใหม่", type="primary", key="btn_add_po_tab2"): 
                 st.session_state.active_dialog = "po_batch"
-                st.rerun() # สั่ง rerun เพื่อเปิดหน้าต่างทันที
+                st.rerun()
         with b2:
             if st.button("🔍 ค้นหา & แก้ไข", type="secondary", key="btn_search_po_tab2"): 
                 st.session_state.active_dialog = "po_search"
@@ -900,9 +904,11 @@ with tab2:
         valid_cols = [c for c in cols_to_use if c in df_master.columns]
         df_display = pd.merge(df_po_filter, df_master[valid_cols], on='Product_ID', how='left')
         
-        # --- Restore Filter Section (จาก Code เดิม) ---
+        # --- Filter Section ---
         with st.container(border=True):
             st.markdown("##### 🔍 ตัวกรองรายการสั่งซื้อ")
+            
+            # 1. ตัวกรองวันที่
             def update_po_dates():
                 y = st.session_state.po_y
                 m_index = thai_months.index(st.session_state.po_m) + 1
@@ -922,17 +928,43 @@ with tab2:
             with c4: st.date_input("วันที่สิ้นสุด", key="po_d_end")
 
             st.divider()
-            col_cat, col_sku = st.columns([1.5, 3])
-            cat_opts = ["แสดงทั้งหมด"] + sorted(df_display['Product_Type'].astype(str).unique().tolist()) if 'Product_Type' in df_display.columns else ["แสดงทั้งหมด"]
-            sku_opts = df_master.apply(lambda x: f"{x['Product_ID']} : {x.get('Product_Name', '')}", axis=1).tolist()
-            with col_cat: sel_cat_po = st.selectbox("หมวดหมู่สินค้า", cat_opts, key="po_cat_filter")
-            with col_sku: sel_skus_po = st.multiselect("รายการที่เลือก:", sku_opts, key="po_sku_filter")
+            
+            # 2. ตัวกรองสถานะ + หมวดหมู่ + SKU
+            f_col1, f_col2, f_col3 = st.columns([2, 2, 3])
+            
+            with f_col1:
+                # --- [แก้ไขข้อความตรงนี้] ---
+                sel_status = st.radio("สถานะการรับของ:", ["ทั้งหมด", "รอจัดส่งสินค้า", "ได้รับสินค้าครบแล้ว"], horizontal=True, index=0)
+            
+            with f_col2:
+                cat_opts = ["แสดงทั้งหมด"] + sorted(df_display['Product_Type'].astype(str).unique().tolist()) if 'Product_Type' in df_display.columns else ["แสดงทั้งหมด"]
+                sel_cat_po = st.selectbox("หมวดหมู่สินค้า", cat_opts, key="po_cat_filter")
+                
+            with f_col3:
+                sku_opts = df_master.apply(lambda x: f"{x['Product_ID']} : {x.get('Product_Name', '')}", axis=1).tolist()
+                sel_skus_po = st.multiselect("รายการที่เลือก:", sku_opts, key="po_sku_filter")
 
-        # Apply Filters
+        # --- Apply Filters ---
+        # 1. Filter Date
         mask_date = (df_display['Order_Date'].dt.date >= st.session_state.po_d_start) & \
                     (df_display['Order_Date'].dt.date <= st.session_state.po_d_end)
         df_final = df_display[mask_date].copy()
 
+        # 2. [UPDATED Logic] Filter Status
+        if sel_status == "รอจัดส่งสินค้า":
+            # กรองเอาเฉพาะที่ วันที่รับ (Received_Date) เป็นค่าว่าง
+            df_final = df_final[
+                (df_final['Received_Date'] == "") | 
+                (df_final['Received_Date'].isna())
+            ]
+        elif sel_status == "ได้รับสินค้าครบแล้ว":
+            # กรองเอาเฉพาะที่มีวันที่รับ
+            df_final = df_final[
+                (df_final['Received_Date'] != "") & 
+                (df_final['Received_Date'].notna())
+            ]
+
+        # 3. Filter Category & SKU
         if sel_cat_po != "แสดงทั้งหมด": df_final = df_final[df_final['Product_Type'] == sel_cat_po]
         if sel_skus_po:
             selected_ids = [s.split(" : ")[0] for s in sel_skus_po]
@@ -940,42 +972,22 @@ with tab2:
 
         # Render Table
         if not df_final.empty:
-            # 1. จัด Format วันที่ (ถ้ามี)
             if 'Order_Date' in df_final.columns: 
                 df_final['Order_Date'] = df_final['Order_Date'].dt.strftime('%Y-%m-%d')
 
-            # 2. สร้างตัวแปรจับคู่ชื่อ (อังกฤษ -> ไทย) สำหรับแสดงผล
             col_rename_map = {
-                'Product_ID': 'รหัสสินค้า',
-                'PO_Number': 'เลข PO',
-                'Transport_Type': 'ขนส่ง',
-                'Order_Date': 'วันที่สั่งซื้อ',
-                'Received_Date': 'วันที่ได้รับ',
-                'Qty_Ordered': 'จำนวน',
-                'Price_Unit_NoVAT': 'ราคา/ชิ้น',
-                'Total_Yuan': 'ราคา (หยวน)',
-                'Total_THB': 'ราคา (บาท)',
-                'Yuan_Rate': 'เรทเงิน',
-                'Ship_Rate': 'เรทค่าขนส่ง',
-                'CBM': 'ขนาด (คิว)',
-                'Ship_Cost': 'ค่าส่ง',
-                'Transport_Weight': 'น้ำหนัก / KG',
-                'Shopee_Price': 'SHOPEE',
-                'Lazada_Price': 'LAZADA',
-                'TikTok_Price': 'TIKTOK',
-                'Note': 'หมายเหตุ',
-                'Link': 'Link_Shop',
-                'Product_Name': 'ชื่อสินค้า',
-                'Image': 'รูป',
-                'Product_Type': 'หมวดหมู่',
-                'Qty_Remaining': 'คงเหลือ (PO)'
+                'Product_ID': 'รหัสสินค้า', 'PO_Number': 'เลข PO', 'Transport_Type': 'ขนส่ง',
+                'Order_Date': 'วันที่สั่งซื้อ', 'Received_Date': 'วันที่ได้รับ', 'Qty_Ordered': 'จำนวน',
+                'Price_Unit_NoVAT': 'ราคา/ชิ้น', 'Total_Yuan': 'ราคา (หยวน)', 'Total_THB': 'ราคา (บาท)',
+                'Yuan_Rate': 'เรทเงิน', 'Ship_Rate': 'เรทค่าขนส่ง', 'CBM': 'ขนาด (คิว)',
+                'Ship_Cost': 'ค่าส่ง', 'Transport_Weight': 'น้ำหนัก / KG',
+                'Shopee_Price': 'SHOPEE', 'Lazada_Price': 'LAZADA', 'TikTok_Price': 'TIKTOK',
+                'Note': 'หมายเหตุ', 'Link': 'Link_Shop', 'Product_Name': 'ชื่อสินค้า',
+                'Image': 'รูป', 'Product_Type': 'หมวดหมู่'
             }
-
-            # 3. เปลี่ยนชื่อคอลัมน์เพื่อสร้างตารางสำหรับโชว์ (df_show)
-            # ใช้ .rename เพื่อไม่ให้กระทบ df_final ตัวจริง
+            
             df_show = df_final.rename(columns=col_rename_map)
 
-            # 4. แสดงผล (สังเกตว่าใน config ต้องใช้ชื่อภาษาไทยตามที่เปลี่ยนแล้ว)
             st.dataframe(
                 df_show.style.map(highlight_negative),
                 column_config={
@@ -987,7 +999,7 @@ with tab2:
                 use_container_width=True, 
                 hide_index=True
             )
-        else: st.warning("⚠️ ไม่พบรายการ")
+        else: st.warning("⚠️ ไม่พบรายการ (ลองเปลี่ยนตัวกรองวันที่ หรือ สถานะ)")
     else: st.info("ยังไม่มีข้อมูล PO")
 
 # ==========================================
