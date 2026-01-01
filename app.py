@@ -115,9 +115,11 @@ def get_po_data():
         # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
-            'วันที่สั่งซื้อ': 'Order_Date', 'วันที่ได้รับ': 'Received_Date', 
-            'จำนวน': 'Qty_Ordered',          # ยอดสั่ง (Order)
-            'จำนวนที่ได้รับ': 'Qty_Received', # ยอดรับจริง (Actual) - [NEW]
+            'วันที่สั่งซื้อ': 'Order_Date', 
+            'วันที่คาดว่าจะได้รับ': 'Expected_Date', # [NEW] เพิ่ม field นี้
+            'วันที่ได้รับ': 'Received_Date', 
+            'จำนวน': 'Qty_Ordered',          
+            'จำนวนที่ได้รับ': 'Qty_Received', 
             'ราคา/ชิ้น': 'Price_Unit_NoVAT', 'ราคา (หยวน)': 'Total_Yuan', 'เรทเงิน': 'Yuan_Rate',
             'เรทค่าขนส่ง': 'Ship_Rate', 'ขนาด (คิว)': 'CBM', 'ค่าส่ง': 'Ship_Cost', 'น้ำหนัก / KG': 'Transport_Weight',
             'SHOPEE': 'Shopee_Price', 'LAZADA': 'Lazada_Price', 'TIKTOK': 'TikTok_Price', 'หมายเหตุ': 'Note',
@@ -133,8 +135,9 @@ def get_po_data():
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
             # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
-            if 'Qty_Received' not in df.columns:
-                df['Qty_Received'] = 0
+            if 'Qty_Received' not in df.columns: df['Qty_Received'] = 0
+            # [NEW] ถ้าไม่มี Expected_Date ให้สร้างเป็น None
+            if 'Expected_Date' not in df.columns: df['Expected_Date'] = None
                  
         return df
     except Exception as e:
@@ -726,141 +729,159 @@ def po_edit_dialog_v2():
 
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
-    st.caption("💡 กรอกข้อมูลสินค้า -> กดเพิ่มลงตระกร้า -> กดบันทึก (รายการจะถูกบันทึกเป็น 'รอรับของ')")
-
     # --- 0. ส่วนจัดการ Reset ค่า ---
     if st.session_state.get("need_reset_inputs", False):
-        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", "bp_note", "bp_shop_s", "bp_shop_l", "bp_shop_t"]
+        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", 
+                         "bp_note", "bp_shop_s", "bp_shop_l", "bp_shop_t", "bp_expected_date", 
+                         "bp_recv_date", "bp_ship_rate"]
         for key in keys_to_reset:
-            if key in st.session_state:
-                del st.session_state[key]
+            if key in st.session_state: del st.session_state[key]
         st.session_state["need_reset_inputs"] = False
 
-    # --- 1. Header (ข้อมูลเอกสาร) ---
+    # ==========================================
+    # 1. ข้อมูลเอกสาร (Header)
+    # ==========================================
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
-        po_number = c1.text_input("เลข PO", placeholder="PO-XXXX", key="bp_po_num")
-        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ🚚", "ทางเรือ🚤", "ทางอากาศ✈️"], key="bp_trans")
+        po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
+        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "AIR", "สินค้าภายใน"], key="bp_trans")
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
 
-    # --- 2. ข้อมูลสินค้า ---
+    # ==========================================
+    # 2. รายละเอียดสินค้า
+    # ==========================================
     with st.container(border=True):
         st.subheader("2. รายละเอียดสินค้า")
+        
+        # --- เลือกสินค้า ---
         prod_list = []
         if not df_master.empty:
             prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
         
         sel_prod = st.selectbox("เลือกสินค้า", prod_list, index=None, key="bp_sel_prod")
         
-        pid = ""
+        # ดึงรูปภาพ
         img_url = ""
+        pid = ""
         if sel_prod:
             pid = sel_prod.split(" : ")[0]
             item_data = df_master[df_master['Product_ID'] == pid]
             if not item_data.empty: img_url = item_data.iloc[0].get('Image', '')
 
-        col_img, col_input = st.columns([1, 3])
-        with col_img:
-            if img_url: st.image(img_url, width=120)
-            else: st.markdown('<div style="background:#333;height:120px;border-radius:8px;"></div>', unsafe_allow_html=True)
-        
-        with col_input:
-            # ใช้ value=None เพื่อให้ช่องว่าง ไม่ต้องลบเลข 0
-            r1c1, r1c2, r1c3 = st.columns(3)
-            total_qty = r1c1.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="0", key="bp_qty")
-            cost_yuan = r1c2.number_input("ต้นทุนสินค้า (หยวน)", min_value=0.0, step=0.01, value=None, format="%.2f", placeholder="0.00", key="bp_cost_yuan")
-            rate_money = r1c3.number_input("เรทเงิน (หยวน)", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="bp_rate") # เรทเงินมักจะคงที่ ใส่ 5.0 ไว้ช่วยอำนวยความสะดวก
-
-            r2c1, r2c2, r2c3 = st.columns(3)
-            # CBM ขอคง 4 ตำแหน่งไว้เผื่อคำนวณละเอียด แต่ถ้าต้องการ 2 จริงๆ แก้ format="%.2f" ได้เลย
-            cbm_val = r2c1.number_input("ขนาด (คิว) ", min_value=0.0, step=0.0001, value=None, format="%.4f", placeholder="0.0000", key="bp_cbm")
-            ship_rate = r2c2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, format="%.2f", placeholder="0.00", key="bp_ship_rate")
-            weight_val = r2c3.number_input("น้ำหนัก (KG)", min_value=0.0, step=0.1, value=None, format="%.2f", placeholder="0.00", key="bp_weight")
+        # --- ส่วนกรอกข้อมูล (Layout ใหม่) ---
+        with st.form(key="add_item_form", clear_on_submit=False): # ใช้ Form เพื่อให้ Enter แล้วไม่ Reload จนกว่าจะกดปุ่ม
+            col_img, col_data = st.columns([1, 4])
             
-            is_cbm_per_piece = st.checkbox("ขนาด(คิว) 'ต่อชิ้น' (ไม่ติ๊ก=รวม)", value=False)
-            st.markdown("---")
-            po_note = st.text_input("หมายเหตุ (Note)", placeholder="ระบุรายละเอียดเพิ่มเติม (ถ้ามี)", key="bp_note")
+            with col_img:
+                if img_url: st.image(img_url, width=120)
+                else: st.markdown('<div style="background:#444;height:120px;border-radius:8px;display:flex;align-items:center;justify-content:center;">No Image</div>', unsafe_allow_html=True)
 
-            with st.expander("ข้อมูลเพิ่มเติม (Link / ราคาขาย)"):
-                x1, x2 = st.columns(2)
-                link_shop = x1.text_input("Link", key="bp_link")
-                wechat = x2.text_input("WeChat", key="bp_wechat")
-                m1, m2, m3 = st.columns(3)
-                p_shopee = m1.number_input("Shopee", value=None, placeholder="0.00", key="bp_shop_s")
-                p_lazada = m2.number_input("Lazada", value=None, placeholder="0.00", key="bp_shop_l")
-                p_tiktok = m3.number_input("TikTok", value=None, placeholder="0.00", key="bp_shop_t")
+            with col_data:
+                st.markdown("**(กรอกตอนสั่งซื้อ)**")
+                # Row 1: Expected Date | Qty | Rate | Ship Rate
+                r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", value=None, key="bp_expected_date")
+                qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="bp_qty")
+                rate_money = r1_c3.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="bp_rate")
+                ship_rate = r1_c4.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, format="%.2f", placeholder="XXXXX", key="bp_ship_rate")
 
-    st.divider()
-    # ปุ่มจะกดได้เมื่อมีเลข PO และ เลือกสินค้าแล้ว
-    btn_disabled = (not po_number) or (not sel_prod)
+                # Row 2: Total Yuan | Note
+                r2_c1, r2_c2 = st.columns([1, 3])
+                total_yuan = r2_c1.number_input("ราคาหยวนทั้งหมด*", min_value=0.0, step=0.01, value=None, format="%.2f", placeholder="XXXXX", key="bp_cost_yuan")
+                note = r2_c2.text_input("หมายเหตุ (ถ้ามี)", placeholder="XXXXX", key="bp_note")
 
-    if st.button("➕ เพิ่มรายการลงตระกร้า", type="primary", disabled=btn_disabled):
-        # 1. จัดการค่า None ให้เป็น 0 เพื่อคำนวณ (Safety Check)
-        c_qty = total_qty if total_qty is not None else 0
-        c_cost_yuan = cost_yuan if cost_yuan is not None else 0.0
-        c_rate = rate_money if rate_money is not None else 0.0
-        c_cbm = cbm_val if cbm_val is not None else 0.0
-        c_ship_rate = ship_rate if ship_rate is not None else 0.0
-        c_weight = weight_val if weight_val is not None else 0.0
-        
-        # 2. คำนวณ
-        unit_yuan = c_cost_yuan / c_qty if c_qty > 0 else 0
-        
-        if is_cbm_per_piece:
-            total_cbm = c_cbm * c_qty
-        else:
-            total_cbm = c_cbm
-        
-        total_ship_cost = total_cbm * c_ship_rate
-        total_thb = (c_cost_yuan * c_rate) 
-        unit_thb_final = ((total_thb) + total_ship_cost) / c_qty if c_qty > 0 else 0
+                # ข้อมูลเพิ่มเติม
+                with st.expander("ข้อมูลเพิ่มเติม (Link / ราคาขาย) ***เหมือนเดิม***", expanded=False):
+                    l1, l2 = st.columns(2)
+                    link_shop = l1.text_input("Link", key="bp_link")
+                    wechat = l2.text_input("WeChat", key="bp_wechat")
+                    p1, p2, p3 = st.columns(3)
+                    p_shopee = p1.number_input("Shopee", value=None, placeholder="0.00", key="bp_shop_s")
+                    p_lazada = p2.number_input("Lazada", value=None, placeholder="0.00", key="bp_shop_l")
+                    p_tiktok = p3.number_input("TikTok", value=None, placeholder="0.00", key="bp_shop_t")
 
-        # ราคาขาย (จัดการ None)
-        s_price = p_shopee if p_shopee is not None else 0
-        l_price = p_lazada if p_lazada is not None else 0
-        t_price = p_tiktok if p_tiktok is not None else 0
+                st.markdown("---")
+                st.markdown("**(กรอกตอนสินค้าเข้า)**")
+                # Row 3: Received Date | CBM | Weight
+                r3_c1, r3_c2, r3_c3 = st.columns(3)
+                recv_date = r3_c1.date_input("วันที่ได้รับสินค้า", value=None, key="bp_recv_date")
+                cbm_val = r3_c2.number_input("ขนาดคิว (คิว)", min_value=0.0, step=0.001, value=None, format="%.4f", placeholder="XXXX", key="bp_cbm")
+                weight_val = r3_c3.number_input("น้ำหนัก", min_value=0.0, step=0.1, value=None, format="%.2f", placeholder="XXXX", key="bp_weight")
 
-        item = {
-            "SKU": pid, "PO": po_number, "Trans": transport_type,
-            "Ord": str(order_date), "Recv": "", "Wait": 0,
-            "Qty": int(c_qty), 
-            "UnitTHB": round(unit_thb_final, 2),
-            "TotYuan": round(c_cost_yuan, 2), 
-            "TotTHB": round(total_thb, 2), 
-            "Rate": c_rate, 
-            "ShipRate": c_ship_rate,
-            "CBM": round(total_cbm, 4), 
-            "ShipCost": round(total_ship_cost, 2), 
-            "W": c_weight, 
-            "UnitYuan": round(unit_yuan, 4), 
-            "Shopee": s_price, "Laz": l_price, "Tik": t_price, 
-            "Note": po_note, "Link": link_shop, "WeChat": wechat
-        }
-        st.session_state.po_temp_cart.append(item)
-        st.toast(f"✅ เพิ่ม {pid} ลงตระกร้าแล้ว", icon="🛒")
-        
-        # เปิด Flag Reset ค่า
-        st.session_state["need_reset_inputs"] = True
-        st.rerun()
+            # ปุ่ม Submit ใน Form
+            submitted = st.form_submit_button("➕ เพิ่มรายการลงตระกร้า", type="primary")
+
+            if submitted:
+                if not po_number or not sel_prod:
+                    st.error("กรุณากรอก เลข PO และ เลือกสินค้า")
+                else:
+                    # 1. จัดการค่า None -> 0
+                    c_qty = qty if qty is not None else 0
+                    c_total_yuan = total_yuan if total_yuan is not None else 0.0
+                    c_rate = rate_money if rate_money is not None else 0.0
+                    c_cbm = cbm_val if cbm_val is not None else 0.0
+                    c_ship_rate = ship_rate if ship_rate is not None else 0.0
+                    c_weight = weight_val if weight_val is not None else 0.0
+                    
+                    # 2. คำนวณ
+                    unit_yuan = c_total_yuan / c_qty if c_qty > 0 else 0
+                    total_ship_cost = c_cbm * c_ship_rate
+                    total_thb = (c_total_yuan * c_rate) 
+                    unit_thb_final = (total_thb + total_ship_cost) / c_qty if c_qty > 0 else 0
+
+                    # วันที่
+                    str_exp_date = str(expected_date) if expected_date else ""
+                    str_recv_date = str(recv_date) if recv_date else ""
+                    
+                    # สถานะการรอ (Wait)
+                    wait_days = 0
+                    if recv_date and order_date:
+                        wait_days = (recv_date - order_date).days
+
+                    item = {
+                        "SKU": pid, "PO": po_number, "Trans": transport_type,
+                        "Ord": str(order_date), 
+                        "Exp": str_exp_date,   # [NEW]
+                        "Recv": str_recv_date, 
+                        "Wait": wait_days,
+                        "Qty": int(c_qty), 
+                        "UnitTHB": round(unit_thb_final, 2),
+                        "TotYuan": round(c_total_yuan, 2), 
+                        "TotTHB": round(total_thb, 2), 
+                        "Rate": c_rate, 
+                        "ShipRate": c_ship_rate,
+                        "CBM": round(c_cbm, 4), 
+                        "ShipCost": round(total_ship_cost, 2), 
+                        "W": c_weight, 
+                        "UnitYuan": round(unit_yuan, 4), 
+                        "Shopee": p_shopee if p_shopee else 0, 
+                        "Laz": p_lazada if p_lazada else 0, 
+                        "Tik": p_tiktok if p_tiktok else 0, 
+                        "Note": note, "Link": link_shop, "WeChat": wechat
+                    }
+                    st.session_state.po_temp_cart.append(item)
+                    st.toast(f"✅ เพิ่ม {pid} ลงตระกร้าแล้ว", icon="🛒")
+                    
+                    # Flag Reset
+                    st.session_state["need_reset_inputs"] = True
+                    st.rerun()
 
     # --- 3. ตระกร้า ---
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
         
-        # สร้าง DataFrame แสดงผล
         cart_df = pd.DataFrame(st.session_state.po_temp_cart)
-        
-        # กำหนด Column Config เพื่อบังคับทศนิยม 2 ตำแหน่ง
         st.dataframe(
-            cart_df[["SKU", "Qty", "TotYuan", "UnitTHB", "Note"]], 
+            cart_df[["SKU", "Qty", "TotYuan", "Exp", "Recv"]], 
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "TotYuan": st.column_config.NumberColumn("รวม (หยวน)", format="%.2f"),
-                "UnitTHB": st.column_config.NumberColumn("ต้นทุน/ชิ้น (บาท)", format="%.2f"),
+                "TotYuan": st.column_config.NumberColumn("รวมหยวน", format="%.2f"),
                 "Qty": st.column_config.NumberColumn("จำนวน", format="%d"),
+                "Exp": st.column_config.TextColumn("คาดว่าจะได้"),
+                "Recv": st.column_config.TextColumn("ได้รับจริง"),
             }
         )
         
@@ -872,25 +893,29 @@ def po_batch_dialog():
         if c2.button("💾 บันทึก PO ทั้งหมด", type="primary"):
             rows_to_save = []
             for i in st.session_state.po_temp_cart:
+                 # โครงสร้างแถวที่จะบันทึกลง Sheet (ต้องตรงกับ Sheet Actual)
+                 # เพิ่ม Exp Date ต่อท้ายสุด (Col 24) หรือแทรกในจุดที่เหมาะสม
+                 # เพื่อความปลอดภัย ผมจะต่อท้ายสุด (Col 24) ถ้า Sheet จริงยังไม่มีคอลัมน์นี้ ให้คุณไปเพิ่มหัวข้อ "วันที่คาดว่าจะได้รับ" ที่คอลัมน์ X (24) หรือต่อจาก WeChat
                  row = [
                      i["SKU"], i["PO"], i["Trans"], i["Ord"], 
                      i["Recv"], i["Wait"], 
                      i["Qty"],  
-                     0,         
-                     0,         
+                     i["Qty"] if i["Recv"] else 0, # Qty Recv (ถ้าใส่วันรับแล้ว ให้ถือว่ารับครบ ถ้ายัง ให้เป็น 0)
+                     i["UnitTHB"],       
                      i["TotYuan"], 
-                     0,         
+                     i["TotTHB"],         
                      i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], 
                      i["UnitYuan"], 
                      i["Shopee"], i["Laz"], i["Tik"], 
-                     i["Note"], i["Link"], i["WeChat"]
+                     i["Note"], i["Link"], i["WeChat"],
+                     i["Exp"] # [NEW] Column 24
                  ]
                  rows_to_save.append(row)
 
             if save_po_batch_to_sheet(rows_to_save):
-                st.success("✅ เปิด PO เรียบร้อย!")
+                st.success("✅ บันทึก PO เรียบร้อย!")
                 st.session_state.po_temp_cart = []
-                if "bp_po_num" in st.session_state: del st.session_state["bp_po_num"]
+                del st.session_state["bp_po_num"]
                 st.session_state.active_dialog = None 
                 time.sleep(1)
                 st.rerun()
@@ -1219,7 +1244,7 @@ with tab2:
                         <th>เลข PO</th>
                         <th>ขนส่ง</th>
                         <th>วันที่สั่งซื้อ</th>
-                        <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
+                        <th style="background-color: #5D4037;">วันที่คาดการณ์</th> <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
                         <th style="background-color: #2c3e50;">ระยะเวลา</th>
                         <th style="background-color: #2c3e50;">จำนวนสั่งซื้อ</th>
                         <th style="background-color: #2c3e50;">จำนวนที่ได้รับ</th>
@@ -1269,23 +1294,24 @@ with tab2:
                 for idx, (i, row) in enumerate(group.iterrows()):
                     table_html += f'<tr style="background-color: {bg_color};">'
                     
-                    # --- [Merged Columns] แสดงแค่รอบเดียว ---
+                    # --- Merged Columns ---
                     if idx == 0:
+                        # ... (ดึงรูป คำนวณราคา เหมือนเดิม) ...
                         img_src = row.get('Image', '')
                         img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
-                        
-                        try: price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
-                        except: price_unit_thb = 0
-                        try: price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
-                        except: price_unit_yuan = 0
 
                         table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged td-img">{img_html}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{row["PO_Number"]}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
                         table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
-                    
-                    # --- [Split Columns] แสดงทุกบรรทัด ---
+
+                    # --- [NEW] Expected Date ---
+                    exp_d = row.get('Expected_Date', '-')
+                    if pd.isna(exp_d) or str(exp_d) == 'None': exp_d = "-"
+                    table_html += f'<td>{exp_d}</td>'
+
+                    # --- [Split Columns] ---
                     recv_d = fmt_date(row['Received_Date'])
                     status_cls = "status-done" if recv_d != "-" else "status-waiting"
                     table_html += f'<td class="{status_cls}">{recv_d}</td>'
