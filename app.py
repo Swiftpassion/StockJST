@@ -745,7 +745,7 @@ def po_batch_dialog():
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
         po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
-        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "AIR", "สินค้าภายใน"], key="bp_trans")
+        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], key="bp_trans")
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
 
     # ==========================================
