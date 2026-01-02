@@ -657,14 +657,30 @@ def po_batch_dialog():
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
+        
         cart_df = pd.DataFrame(st.session_state.po_temp_cart)
-        st.dataframe(cart_df[["SKU", "Qty", "TotYuan", "Exp", "Recv"]], use_container_width=True, hide_index=True)
+        
+        # แสดงผลโดยเปลี่ยนชื่อหัวตารางเป็นภาษาไทย
+        st.dataframe(
+            cart_df[["SKU", "Qty", "TotYuan", "Exp", "Recv"]], 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "SKU": st.column_config.TextColumn("ชื่อสินค้า"),
+                "Qty": st.column_config.NumberColumn("จำนวน", format="%d"),
+                "TotYuan": st.column_config.NumberColumn("ราคาหยวนทั้งหมด", format="%.2f"),
+                "Exp": st.column_config.TextColumn("วันที่คาดว่าจะได้รับ"),
+                "Recv": st.column_config.TextColumn("วันที่ได้รับสินค้า"),
+            }
+        )
         
         c1, c2 = st.columns([1, 4])
         if c1.button("🗑️ ล้างตระกร้า"):
             st.session_state.po_temp_cart = []
             st.rerun()
+            
         if c2.button("💾 บันทึก PO ทั้งหมด", type="primary"):
+            # ... (ส่วนบันทึกเหมือนเดิม) ...
             rows = []
             for i in st.session_state.po_temp_cart:
                  rows.append([
@@ -674,12 +690,12 @@ def po_batch_dialog():
                      i["UnitTHB"], i["TotYuan"], i["TotTHB"],         
                      i["Rate"], i["ShipRate"], i["CBM"], i["ShipCost"], i["W"], i["UnitYuan"], 
                      i["Shopee"], i["Laz"], i["Tik"], i["Note"], i["Link"], i["WeChat"],
-                     i["Exp"] # [NEW] Column 24
+                     i["Exp"] 
                  ])
             if save_po_batch_to_sheet(rows):
                 st.success("✅ บันทึกสำเร็จ!")
                 st.session_state.po_temp_cart = []
-                del st.session_state["bp_po_num"]
+                if "bp_po_num" in st.session_state: del st.session_state["bp_po_num"]
                 st.session_state.active_dialog = None 
                 time.sleep(1)
                 st.rerun()
