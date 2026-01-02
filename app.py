@@ -112,12 +112,11 @@ def get_po_data():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ (เพิ่ม Expected_Date) ---
+        # --- Map ชื่อคอลัมน์ภาษาไทย เป็นภาษาอังกฤษ ---
         col_map = {
             'รหัสสินค้า': 'Product_ID', 'เลข PO': 'PO_Number', 'ขนส่ง': 'Transport_Type',
             'วันที่สั่งซื้อ': 'Order_Date', 
-            'Expected_Date': 'Expected_Date', 'วันที่คาดว่าจะได้รับ': 'Expected_Date', # [NEW]
-            'วันที่คาดการณ์': 'Expected_Date',
+            'Expected_Date': 'Expected_Date', 'วันที่คาดว่าจะได้รับ': 'Expected_Date', 'วันที่คาดการณ์': 'Expected_Date',
             'วันที่ได้รับ': 'Received_Date', 
             'จำนวน': 'Qty_Ordered',          
             'จำนวนที่ได้รับ': 'Qty_Received', 
@@ -135,13 +134,8 @@ def get_po_data():
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # ถ้าไม่มีคอลัมน์ Qty_Received ให้สร้างขึ้นมาเป็น 0
-            if 'Qty_Received' not in df.columns:
-                df['Qty_Received'] = 0
-            
-            # [NEW] ถ้าไม่มี Expected_Date ให้สร้าง
-            if 'Expected_Date' not in df.columns:
-                df['Expected_Date'] = None
+            if 'Qty_Received' not in df.columns: df['Qty_Received'] = 0
+            if 'Expected_Date' not in df.columns: df['Expected_Date'] = None
                  
         return df
     except Exception as e:
@@ -185,7 +179,7 @@ def get_sale_from_folder():
         st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
 
-# --- ฟังก์ชันบันทึกแบบ Split (Update แถวเดิม + Append แถวใหม่) ---
+# --- Functions: Save Data ---
 def save_po_edit_split(row_index, current_row_data, new_row_data):
     try:
         creds = get_credentials()
@@ -244,14 +238,12 @@ def save_po_edit_update(row_index, current_row_data):
         st.error(f"❌ บันทึก Update ไม่สำเร็จ: {e}")
         return False
 
-# --- ฟังก์ชันบันทึกแบบ Batch (สำหรับ Add New) ---
 def save_po_batch_to_sheet(rows_data):
     try:
         creds = get_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_PO)
-        
         ws.append_rows(rows_data)
         st.cache_data.clear() 
         return True
@@ -306,9 +298,7 @@ def update_master_limits(df_edited):
 # 4. Main App & Data Loading
 # ==========================================
 st.title("📊 JST Hybrid Management System")
-if "active_dialog" not in st.session_state:
-    st.session_state.active_dialog = None 
-
+if "active_dialog" not in st.session_state: st.session_state.active_dialog = None 
 if "selected_product_history" not in st.session_state: st.session_state.selected_product_history = None
 if 'po_temp_cart' not in st.session_state: st.session_state.po_temp_cart = []
 
@@ -409,7 +399,7 @@ def show_history_dialog(fixed_product_id=None):
                             price_unit_thb = float(row.get('Total_THB', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                             price_unit_yuan = float(row.get('Total_Yuan', 0)) / float(row.get('Qty_Ordered', 1)) if float(row.get('Qty_Ordered', 1)) > 0 else 0
                             table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
-                            table_html += f'<td rowspan="{row_count}" class="td-merged td-img">{img_html}</td>'
+                            table_html += f'<td rowspan="{row_count}" class="td-merged">{img_html}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged">{row["PO_Number"]}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
@@ -576,7 +566,7 @@ def po_batch_dialog():
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
         po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
-        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], key="bp_trans")
+        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "AIR", "สินค้าภายใน"], key="bp_trans")
         order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
 
     # --- 2. Details ---
@@ -887,6 +877,24 @@ with tab2:
             with c3: st.date_input("วันที่เริ่มต้น", key="po_d_start")
             with c4: st.date_input("วันที่สิ้นสุด", key="po_d_end")
 
+            st.divider()
+            
+            # [ADDED BACK] Status / Cat / SKU Filters
+            f_col1, f_col2, f_col3 = st.columns([2, 2, 3])
+            with f_col1:
+                sel_status = st.radio("สถานะการรับของ:", ["ทั้งหมด", "รอจัดส่งสินค้า", "ได้รับสินค้าครบแล้ว"], horizontal=True, index=0)
+            
+            with f_col2:
+                # Merge logic to find all possible types
+                all_types = ["แสดงทั้งหมด"]
+                if not df_master.empty and 'Product_Type' in df_master.columns:
+                    all_types += sorted(df_master['Product_Type'].astype(str).unique().tolist())
+                sel_cat_po = st.selectbox("หมวดหมู่สินค้า", all_types, key="po_cat_filter")
+                
+            with f_col3:
+                sku_opts = df_master.apply(lambda x: f"{x['Product_ID']} : {x.get('Product_Name', '')}", axis=1).tolist()
+                sel_skus_po = st.multiselect("รายการที่เลือก:", sku_opts, key="po_sku_filter")
+
         df_po_filter = df_po.copy()
         if 'Order_Date' in df_po_filter.columns: df_po_filter['Order_Date'] = pd.to_datetime(df_po_filter['Order_Date'], errors='coerce')
         if 'Received_Date' in df_po_filter.columns: df_po_filter['Received_Date'] = pd.to_datetime(df_po_filter['Received_Date'], errors='coerce')
@@ -895,8 +903,23 @@ with tab2:
         df_po_filter['Product_ID'] = df_po_filter['Product_ID'].astype(str)
         df_display = pd.merge(df_po_filter, df_master[['Product_ID','Product_Name','Image','Product_Type']], on='Product_ID', how='left')
         
+        # --- Apply Filters ---
         mask_date = (df_display['Order_Date'].dt.date >= st.session_state.po_d_start) & (df_display['Order_Date'].dt.date <= st.session_state.po_d_end)
         df_display = df_display[mask_date]
+
+        if sel_status == "รอจัดส่งสินค้า":
+            df_display = df_display[df_display['Received_Date'].isna()]
+        elif sel_status == "ได้รับสินค้าครบแล้ว":
+            df_display = df_display[df_display['Received_Date'].notna()]
+
+        if sel_cat_po != "แสดงทั้งหมด":
+            df_display = df_display[df_display['Product_Type'] == sel_cat_po]
+
+        if sel_skus_po:
+            selected_ids = [s.split(" : ")[0] for s in sel_skus_po]
+            df_display = df_display[df_display['Product_ID'].isin(selected_ids)]
+
+        # Sort
         df_display = df_display.sort_values(by=['Order_Date', 'PO_Number', 'Product_ID', 'Received_Date'])
         
         # --- HTML Table with Expected Date ---
