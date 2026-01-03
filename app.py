@@ -1238,4 +1238,4 @@ with tab3:
 # ==========================================
 if st.session_state.active_dialog == "po_batch": po_batch_dialog()
 elif st.session_state.active_dialog == "po_search": po_edit_dialog_v2() 
-elif st.session_state.active_dialog == "history" and dialog_data: show_history_dialog(fixed_product_id=dialog_data)
+elif st.session_state.active_dialog == "history": show_history_dialog(fixed_product_id=st.session_state.get("selected_product_history"))
