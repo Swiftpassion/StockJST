@@ -416,8 +416,18 @@ def show_history_dialog(fixed_product_id=None):
 
                         if idx == 0:
                             vals = {k: fmt_num(row.get(k, 0)) for k in ['Total_Yuan','Total_THB','Yuan_Rate','Ship_Rate','CBM','Ship_Cost','Transport_Weight','Shopee_Price','Lazada_Price','TikTok_Price']}
-                            link_html = f'<a href="{row.get("Link","")}" target="_blank" class="table-link">🔗</a>' if row.get("Link","") else '-'
-                            wechat_html = f'<a href="{row.get("WeChat","")}" target="_blank" class="table-link">💬</a>' if row.get("WeChat","") else '-'
+                            l_val = str(row.get("Link", "")).strip()
+                            w_val = str(row.get("WeChat", "")).strip()
+                            
+                            if l_val:
+                                safe_l = l_val.replace("'", "\\'")
+                                link_html = f'<a href="javascript:prompt(\'📋 Link:\', \'{safe_l}\')" style="text-decoration:none; font-size:18px;">🔗</a>'
+                            else: link_html = '-'
+                                
+                            if w_val:
+                                safe_w = w_val.replace("'", "\\'")
+                                wechat_html = f'<a href="javascript:prompt(\'💬 WeChat:\', \'{safe_w}\')" style="text-decoration:none; font-size:18px; color:#25D366;">💬</a>'
+                            else: wechat_html = '-'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{vals["Total_Yuan"]}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{vals["Total_THB"]}</td>'
@@ -1134,31 +1144,25 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK (ใช้ javascript:void(0) เพื่อไม่ให้เปลี่ยนหน้า)
+                    # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # เตรียมข้อความ (ป้องกัน error จากเครื่องหมายคำพูด)
                         safe_link = link_val.replace("'", "\\'")
-                        # คำสั่ง JS: ให้เด้ง Prompt ขึ้นมาพร้อมข้อความ
-                        js_cmd = f"window.prompt('📋 Link ร้านค้า (Copy ได้เลย):', '{safe_link}')"
-                        
+                        # ฝังคำสั่งใน href โดยตรง
                         icons_html.append(
-                            f'<a href="javascript:void(0);" onclick="{js_cmd}" '
-                            f'title="{safe_link}" '
-                            f'style="text-decoration:none; font-size:20px; cursor:pointer; margin-right:5px;">🔗</a>'
+                            f'<a href="javascript:prompt(\'📋 Copy Link ร้านค้า:\', \'{safe_link}\')"'
+                            f' title="{safe_link}"'
+                            f' style="text-decoration:none; font-size:20px; margin-right:5px;">🔗</a>'
                         )
 
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'")
-                        js_cmd_wc = f"window.prompt('💬 WeChat ID:', '{safe_wechat}')"
-                        
                         icons_html.append(
-                            f'<a href="javascript:void(0);" onclick="{js_cmd_wc}" '
-                            f'title="{safe_wechat}" '
-                            f'style="text-decoration:none; font-size:20px; cursor:pointer; color:#25D366;">💬</a>'
+                            f'<a href="javascript:prompt(\'💬 WeChat ID:\', \'{safe_wechat}\')"'
+                            f' title="{safe_wechat}"'
+                            f' style="text-decoration:none; font-size:20px; color:#25D366;">💬</a>'
                         )
                     
-                    # รวม HTML หรือแสดงขีดถ้าไม่มีข้อมูล
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
                 
