@@ -1129,9 +1129,32 @@ with tab2:
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Note","")}</td>'
                     
                     # 25. ร้านค้า (Link)
-                    link = row.get("Link", "")
-                    link_html = f'<a href="{link}" target="_blank">🔗 Link</a>' if link else '-'
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{link_html}</td>'
+                    link_val = str(row.get("Link", "")).strip()
+                    wechat_val = str(row.get("WeChat", "")).strip()
+                    
+                    store_html_items = []
+                    
+                    # 1. จัดการ LINK (ใช้ window.prompt เพื่อให้พนักงาน Copy ได้ง่าย)
+                    if link_val and link_val.lower() not in ['nan', 'none', '']:
+                        # Escape เครื่องหมาย ' เพื่อไม่ให้ JavaScript พัง
+                        safe_link = link_val.replace("'", "\\'")
+                        # สร้างคำสั่ง JS: แสดงกล่องข้อความให้ Copy
+                        js_link = f"window.prompt('📋 Copy Link ร้านค้า:', '{safe_link}')"
+                        # สร้าง Icon Link
+                        store_html_items.append(f'<a href="javascript:void(0);" onclick="{js_link}" title="คลิกเพื่อดู Link" style="text-decoration:none; font-size:18px; margin-right:8px;">🔗</a>')
+                    
+                    # 2. จัดการ WeChat
+                    if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
+                        safe_wechat = wechat_val.replace("'", "\\'")
+                        js_wechat = f"window.prompt('💬 WeChat ID (Copy):', '{safe_wechat}')"
+                        # สร้าง Icon WeChat (สีเขียวอ่อน)
+                        store_html_items.append(f'<a href="javascript:void(0);" onclick="{js_wechat}" title="คลิกเพื่อดู WeChat ID" style="text-decoration:none; font-size:18px; color:#76ff03;">💬</a>')
+                        
+                    # รวม HTML หรือใส่ขีดถ้าไม่มีข้อมูล
+                    store_html = "".join(store_html_items) if store_html_items else "-"
+                    
+                    # ใส่ลงในตาราง
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{store_html}</td>'
                 
                 table_html += "</tr>"
         
