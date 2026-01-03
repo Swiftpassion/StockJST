@@ -1132,29 +1132,35 @@ with tab2:
                     link_val = str(row.get("Link", "")).strip()
                     wechat_val = str(row.get("WeChat", "")).strip()
                     
-                    store_html_items = []
+                    icons_html = []
                     
-                    # 1. จัดการ LINK (ใช้ window.prompt เพื่อให้พนักงาน Copy ได้ง่าย)
+                    # 1. จัดการ LINK (ใช้ javascript:void(0) เพื่อไม่ให้เปลี่ยนหน้า)
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # Escape เครื่องหมาย ' เพื่อไม่ให้ JavaScript พัง
+                        # เตรียมข้อความ (ป้องกัน error จากเครื่องหมายคำพูด)
                         safe_link = link_val.replace("'", "\\'")
-                        # สร้างคำสั่ง JS: แสดงกล่องข้อความให้ Copy
-                        js_link = f"window.prompt('📋 Copy Link ร้านค้า:', '{safe_link}')"
-                        # สร้าง Icon Link
-                        store_html_items.append(f'<a href="javascript:void(0);" onclick="{js_link}" title="คลิกเพื่อดู Link" style="text-decoration:none; font-size:18px; margin-right:8px;">🔗</a>')
-                    
+                        # คำสั่ง JS: ให้เด้ง Prompt ขึ้นมาพร้อมข้อความ
+                        js_cmd = f"window.prompt('📋 Link ร้านค้า (Copy ได้เลย):', '{safe_link}')"
+                        
+                        icons_html.append(
+                            f'<a href="javascript:void(0);" onclick="{js_cmd}" '
+                            f'title="{safe_link}" '
+                            f'style="text-decoration:none; font-size:20px; cursor:pointer; margin-right:5px;">🔗</a>'
+                        )
+
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'")
-                        js_wechat = f"window.prompt('💬 WeChat ID (Copy):', '{safe_wechat}')"
-                        # สร้าง Icon WeChat (สีเขียวอ่อน)
-                        store_html_items.append(f'<a href="javascript:void(0);" onclick="{js_wechat}" title="คลิกเพื่อดู WeChat ID" style="text-decoration:none; font-size:18px; color:#76ff03;">💬</a>')
+                        js_cmd_wc = f"window.prompt('💬 WeChat ID:', '{safe_wechat}')"
                         
-                    # รวม HTML หรือใส่ขีดถ้าไม่มีข้อมูล
-                    store_html = "".join(store_html_items) if store_html_items else "-"
+                        icons_html.append(
+                            f'<a href="javascript:void(0);" onclick="{js_cmd_wc}" '
+                            f'title="{safe_wechat}" '
+                            f'style="text-decoration:none; font-size:20px; cursor:pointer; color:#25D366;">💬</a>'
+                        )
                     
-                    # ใส่ลงในตาราง
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{store_html}</td>'
+                    # รวม HTML หรือแสดงขีดถ้าไม่มีข้อมูล
+                    final_store_html = "".join(icons_html) if icons_html else "-"
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
                 
                 table_html += "</tr>"
         
