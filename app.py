@@ -1168,8 +1168,8 @@ with tab2:
                         icons_html.append(
                             f"""<a href="?view_info={safe_link}&t={ts}_{idx}" 
                                    target="_self"
-                                   title="คลิกเพื่อดูรายละเอียด" 
-                                   style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
+                                   title="ลิงก์ร้านค้า" 
+                                   style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">
                                 🔗</a>"""
                         )
 
@@ -1179,8 +1179,8 @@ with tab2:
                         icons_html.append(
                             f"""<a href="?view_info={safe_wechat}&t={ts}_{idx}" 
                                    target="_self"
-                                   title="คลิกเพื่อดูรายละเอียด" 
-                                   style="text-decoration:none; font-size:20px; color:#25D366;">
+                                   title="Wechat" 
+                                   style="text-decoration:none; font-size:16px; color:#25D366;">
                                 💬</a>"""
                         )
                     
