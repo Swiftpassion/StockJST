@@ -1146,24 +1146,28 @@ with tab2:
                     
                     # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
-                        # เปลี่ยนคำภาษาอังกฤษในวงเล็บเป็นคำที่คุณต้องการได้ตรงนี้
+                        # แปลงตัวอักษรพิเศษให้เป็นรหัส URL เพื่อไม่ให้ลิกง์พัง
+                        import urllib.parse
+                        safe_link = urllib.parse.quote(link_val)
+                        
+                        # สร้าง Link ที่สั่ง Reload หน้าเว็บพร้อมส่งค่า view_info
                         icons_html.append(
-                            f"""<a href="javascript:void(prompt('รายละเอียด (Link):', '{safe_link}'))" 
+                            f"""<a href="?view_info={safe_link}" 
                                    target="_self"
-                                   title="{safe_link}" 
+                                   title="คลิกเพื่อดูรายละเอียด" 
                                    style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
                                 🔗</a>"""
                         )
 
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
-                        safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
-                        # เปลี่ยนคำภาษาอังกฤษในวงเล็บเป็นคำที่คุณต้องการได้ตรงนี้
+                        import urllib.parse
+                        safe_wechat = urllib.parse.quote(wechat_val)
+                        
                         icons_html.append(
-                            f"""<a href="javascript:void(prompt('รายละเอียด (WeChat):', '{safe_wechat}'))" 
+                            f"""<a href="?view_info={safe_wechat}" 
                                    target="_self"
-                                   title="{safe_wechat}" 
+                                   title="คลิกเพื่อดูรายละเอียด" 
                                    style="text-decoration:none; font-size:20px; color:#25D366;">
                                 💬</a>"""
                         )
