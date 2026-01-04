@@ -1147,8 +1147,7 @@ with tab2:
                     # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
-                        # ใช้ <a> + javascript:void(prompt) แบบเดิมที่เคยทำงานได้
-                        # เปลี่ยนข้อความใน prompt เป็น 'รายละเอียด (Link):'
+                        # เปลี่ยนคำภาษาอังกฤษในวงเล็บเป็นคำที่คุณต้องการได้ตรงนี้
                         icons_html.append(
                             f"""<a href="javascript:void(prompt('รายละเอียด (Link):', '{safe_link}'))" 
                                    target="_self"
@@ -1160,7 +1159,7 @@ with tab2:
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
-                        # เปลี่ยนข้อความใน prompt เป็น 'รายละเอียด (WeChat):'
+                        # เปลี่ยนคำภาษาอังกฤษในวงเล็บเป็นคำที่คุณต้องการได้ตรงนี้
                         icons_html.append(
                             f"""<a href="javascript:void(prompt('รายละเอียด (WeChat):', '{safe_wechat}'))" 
                                    target="_self"
@@ -1171,7 +1170,7 @@ with tab2:
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
-                    
+
         st.markdown(table_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
