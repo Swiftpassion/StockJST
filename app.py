@@ -635,9 +635,17 @@ def po_edit_dialog_v2():
                 
                 orig_yuan = float(get_val('Total_Yuan', 0))
                 orig_cbm = float(get_val('CBM', 0))
+                orig_thb = float(get_val('Total_THB', 0)) # <--- 1. ดึงยอดบาทเดิมมา
                 
+                # คำนวณส่วนต่าง
                 rem_yuan = orig_yuan - final_total_yuan if (orig_yuan > final_total_yuan) else 0
                 rem_cbm = orig_cbm - final_cbm if (orig_cbm > final_cbm) else 0
+                
+                # <--- 2. เพิ่ม Logic คำนวณบาทคงเหลือ (เฉพาะ Internal)
+                rem_thb = 0
+                if is_internal:
+                    rem_thb = orig_thb - final_total_thb
+                    if rem_thb < 0: rem_thb = 0
                 
                 data_rem = [
                     get_val('Product_ID', ''), get_val('PO_Number', ''), trans_type, d_ord.strftime("%Y-%m-%d"), 
@@ -645,7 +653,7 @@ def po_edit_dialog_v2():
                     0, # Recv Qty
                     0, # Unit Cost (unknown yet)
                     round(rem_yuan, 2), # Remaining Yuan
-                    0, # Remaining THB (calc later when recv)
+                    round(rem_thb, 2) if is_internal else 0, # <--- 3. ใส่ rem_thb ตรงนี้แทนเลข 0
                     e_rate if not is_internal else 0, 
                     e_ship_rate if not is_internal else 0, 
                     round(rem_cbm, 4), 
