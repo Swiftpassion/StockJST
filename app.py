@@ -1144,24 +1144,22 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK
+                    # 1. จัดการ LINK -> เรียก openModal
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # Escape ตัวอักษรพิเศษ
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
-                        # target="_self" คือหัวใจสำคัญที่ทำให้ไม่เด้งไปหน้าอื่น
                         icons_html.append(
-                            f"""<a href="javascript:void(prompt('📋 Copy Link:', '{safe_link}'))" 
+                            f"""<a href="javascript:openModal('{safe_link}')" 
                                    target="_self"
                                    title="{safe_link}" 
                                    style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
                                 🔗</a>"""
                         )
 
-                    # 2. จัดการ WeChat
+                    # 2. จัดการ WeChat -> เรียก openModal
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f"""<a href="javascript:void(prompt('💬 WeChat ID:', '{safe_wechat}'))" 
+                            f"""<a href="javascript:openModal('{safe_wechat}')" 
                                    target="_self"
                                    title="{safe_wechat}" 
                                    style="text-decoration:none; font-size:20px; color:#25D366;">
@@ -1170,11 +1168,49 @@ with tab2:
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
+                    # ============================================================
                 
                 table_html += "</tr>"
         
         table_html += "</tbody></table></div>"
-        st.markdown(table_html, unsafe_allow_html=True)
+
+        # ============================================================
+        # [ส่วนที่ 2] ฝัง HTML/CSS/JS สำหรับกล่อง Modal (Pop-up สวยๆ)
+        # ============================================================
+        custom_modal_html = """
+        <div id="customModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
+            <div style="background-color:#262730; margin: 0; padding: 20px; border: 1px solid #444; width: 400px; border-radius:10px; position:absolute; top:50%; left:50%; transform: translate(-50%, -50%); box-shadow: 0 5px 15px rgba(0,0,0,0.5); text-align:center; font-family:sans-serif;">
+                <h3 style="margin-top:0; margin-bottom:15px; color:#fff; font-size:18px;">📋 ข้อมูลร้านค้า</h3>
+                
+                <input type="text" id="modalInput" style="width:100%; padding:10px; margin-bottom:20px; border-radius:5px; border:1px solid #555; background-color:#1e1e1e; color:#fff; font-size:16px; text-align:center;" readonly>
+                
+                <div style="display:flex; justify-content:center; gap:10px;">
+                    <button onclick="copyAndClose()" style="cursor:pointer; padding:8px 20px; background-color:#00C853; color:white; border:none; border-radius:5px; font-weight:bold; font-size:14px;">Copy</button>
+                    <button onclick="closeModal()" style="cursor:pointer; padding:8px 20px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; font-weight:bold; font-size:14px;">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        function openModal(text) {
+            document.getElementById('customModal').style.display = 'block';
+            var input = document.getElementById('modalInput');
+            input.value = text;
+            input.select();
+        }
+        function closeModal() {
+            document.getElementById('customModal').style.display = 'none';
+        }
+        function copyAndClose() {
+            var copyText = document.getElementById("modalInput");
+            copyText.select();
+            navigator.clipboard.writeText(copyText.value).then(() => {
+                closeModal();
+            });
+        }
+        </script>
+        """
+        st.markdown(table_html + custom_modal_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
 # --- TAB 3: Stock ---
