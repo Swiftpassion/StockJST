@@ -420,13 +420,13 @@ def show_history_dialog(fixed_product_id=None):
                             w_val = str(row.get("WeChat", "")).strip()
                             
                             if l_val:
-                                safe_l = l_val.replace("'", "\\'")
-                                link_html = f'<a href="javascript:prompt(\'📋 Link:\', \'{safe_l}\')" style="text-decoration:none; font-size:18px;">🔗</a>'
+                                safe_l = l_val.replace("'", "\\'").replace('"', '&quot;')
+                                link_html = f"""<a href="javascript:void(prompt('📋 Link:', '{safe_l}'))" style="text-decoration:none; font-size:18px;">🔗</a>"""
                             else: link_html = '-'
                                 
                             if w_val:
-                                safe_w = w_val.replace("'", "\\'")
-                                wechat_html = f'<a href="javascript:prompt(\'💬 WeChat:\', \'{safe_w}\')" style="text-decoration:none; font-size:18px; color:#25D366;">💬</a>'
+                                safe_w = w_val.replace("'", "\\'").replace('"', '&quot;')
+                                wechat_html = f"""<a href="javascript:void(prompt('💬 WeChat:', '{safe_w}'))" style="text-decoration:none; font-size:18px; color:#25D366;">💬</a>"""
                             else: wechat_html = '-'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{vals["Total_Yuan"]}</td>'
@@ -1144,25 +1144,26 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK (ใช้ span แทน a)
+                    # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # Escape เครื่องหมาย ' และ " เพื่อป้องกัน JS Error
+                        # Escape ' สำหรับ JS และ " สำหรับ HTML Attribute
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
+                        # ใช้ void(...) ครอบ prompt เพื่อไม่ให้ Browser เปลี่ยนหน้า
                         icons_html.append(
-                            f"""<span onclick="prompt('📋 Copy Link:', '{safe_link}')" 
-                                      title="{safe_link}" 
-                                      style="cursor:pointer; font-size:20px; margin-right:5px; color:#007bff;">
-                                🔗</span>"""
+                            f"""<a href="javascript:void(prompt('📋 Copy Link:', '{safe_link}'))" 
+                                   title="{safe_link}" 
+                                   style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
+                                🔗</a>"""
                         )
 
-                    # 2. จัดการ WeChat (ใช้ span แทน a)
+                    # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f"""<span onclick="prompt('💬 WeChat ID:', '{safe_wechat}')" 
-                                      title="{safe_wechat}" 
-                                      style="cursor:pointer; font-size:20px; color:#25D366;">
-                                💬</span>"""
+                            f"""<a href="javascript:void(prompt('💬 WeChat ID:', '{safe_wechat}'))" 
+                                   title="{safe_wechat}" 
+                                   style="text-decoration:none; font-size:20px; color:#25D366;">
+                                💬</a>"""
                         )
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
