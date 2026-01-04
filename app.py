@@ -1144,26 +1144,25 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK -> เรียก openModal
+                    # 1. จัดการ LINK (ใช้ span แทน a)
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
+                        # ใช้ span และ onclick ตรงๆ (ตัด href และ target ทิ้งไปเลย)
                         icons_html.append(
-                            f"""<a href="javascript:openModal('{safe_link}')" 
-                                   target="_self"
-                                   title="{safe_link}" 
-                                   style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
-                                🔗</a>"""
+                            f"""<span onclick="openModal('{safe_link}')" 
+                                      title="{safe_link}" 
+                                      style="cursor:pointer; font-size:20px; margin-right:5px; color:#007bff; display:inline-block;">
+                                🔗</span>"""
                         )
 
-                    # 2. จัดการ WeChat -> เรียก openModal
+                    # 2. จัดการ WeChat (ใช้ span แทน a)
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f"""<a href="javascript:openModal('{safe_wechat}')" 
-                                   target="_self"
-                                   title="{safe_wechat}" 
-                                   style="text-decoration:none; font-size:20px; color:#25D366;">
-                                💬</a>"""
+                            f"""<span onclick="openModal('{safe_wechat}')" 
+                                      title="{safe_wechat}" 
+                                      style="cursor:pointer; font-size:20px; color:#25D366; display:inline-block;">
+                                💬</span>"""
                         )
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
