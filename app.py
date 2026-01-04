@@ -612,7 +612,7 @@ def po_batch_dialog():
                 else: st.info("No Image")
 
             with col_data:
-                st.markdown("**(กรอกตอนสั่งซื้อ)**")
+                st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
                 r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
                 expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", value=None, key="bp_expected_date")
                 qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="bp_qty")
@@ -756,7 +756,6 @@ def po_internal_batch_dialog():
             if not item_data.empty: img_url = item_data.iloc[0].get('Image', '')
 
         with st.form(key="add_item_form_internal", clear_on_submit=False):
-            st.markdown("**(กรอกตอนสั่งซื้อ)**")
             
             # Row 1: Image | Exp Date | Qty | Recv Date
             col_img, col_data = st.columns([1, 4])
@@ -765,6 +764,7 @@ def po_internal_batch_dialog():
                 else: st.info("No Image")
             
             with col_data:
+                st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
                 r1_c1, r1_c2, r1_c3 = st.columns(3)
                 expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", value=None, key="int_expected_date")
                 qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="int_qty")
