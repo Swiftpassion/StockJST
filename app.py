@@ -421,12 +421,12 @@ def show_history_dialog(fixed_product_id=None):
                             
                             if l_val:
                                 safe_l = l_val.replace("'", "\\'").replace('"', '&quot;')
-                                link_html = f"""<a href="javascript:void(prompt('📋 Link:', '{safe_l}'))" style="text-decoration:none; font-size:18px;">🔗</a>"""
+                                link_html = f"""<a href="javascript:void(prompt('📋 Link:', '{safe_l}'))" target="_self" style="text-decoration:none; font-size:18px;">🔗</a>"""
                             else: link_html = '-'
                                 
                             if w_val:
                                 safe_w = w_val.replace("'", "\\'").replace('"', '&quot;')
-                                wechat_html = f"""<a href="javascript:void(prompt('💬 WeChat:', '{safe_w}'))" style="text-decoration:none; font-size:18px; color:#25D366;">💬</a>"""
+                                wechat_html = f"""<a href="javascript:void(prompt('💬 WeChat:', '{safe_w}'))" target="_self" style="text-decoration:none; font-size:18px; color:#25D366;">💬</a>"""
                             else: wechat_html = '-'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{fmt_num(price_unit_thb)}</td>'
                             table_html += f'<td rowspan="{row_count}" class="td-merged num-val">{vals["Total_Yuan"]}</td>'
@@ -1146,11 +1146,12 @@ with tab2:
                     
                     # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # Escape ' สำหรับ JS และ " สำหรับ HTML Attribute
+                        # Escape ตัวอักษรพิเศษ
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
-                        # ใช้ void(...) ครอบ prompt เพื่อไม่ให้ Browser เปลี่ยนหน้า
+                        # target="_self" คือหัวใจสำคัญที่ทำให้ไม่เด้งไปหน้าอื่น
                         icons_html.append(
                             f"""<a href="javascript:void(prompt('📋 Copy Link:', '{safe_link}'))" 
+                                   target="_self"
                                    title="{safe_link}" 
                                    style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
                                 🔗</a>"""
@@ -1161,6 +1162,7 @@ with tab2:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
                             f"""<a href="javascript:void(prompt('💬 WeChat ID:', '{safe_wechat}'))" 
+                                   target="_self"
                                    title="{safe_wechat}" 
                                    style="text-decoration:none; font-size:20px; color:#25D366;">
                                 💬</a>"""
