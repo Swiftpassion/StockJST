@@ -323,6 +323,16 @@ if not df_sale.empty and 'Date_Only' in df_sale.columns:
 # DIALOGS
 # ==========================================
 
+@st.dialog("📋 รายละเอียดข้อมูล", width="small")
+def show_info_dialog(text_val):
+    st.info("💡 สามารถกดปุ่ม Copy มุมขวาบนของกล่องข้อความได้เลย")
+    st.code(text_val, language="text") 
+    
+    # ปุ่มปิด: กดแล้วจะลบ Link ด้านบนทิ้ง ทำให้หน้าเว็บกลับมาปกติ
+    if st.button("❌ ปิดหน้าต่าง", type="primary", use_container_width=True):
+        st.query_params.clear()
+        st.rerun()
+
 @st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
 def show_history_dialog(fixed_product_id=None):
     st.markdown("""<style>div[data-testid="stDialog"] { width: 95vw !important; max-width: 95vw !important; }</style>""", unsafe_allow_html=True)
@@ -870,6 +880,10 @@ with tab1:
 
 # --- TAB 2: Purchase Orders ---
 with tab2:
+    if "view_info" in st.query_params:
+        val_to_show = st.query_params["view_info"]
+        show_info_dialog(val_to_show)
+
     col_head, col_action = st.columns([4, 2])
     with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า")
     with col_action:
@@ -1143,16 +1157,16 @@ with tab2:
                     wechat_val = str(row.get("WeChat", "")).strip()
                     
                     icons_html = []
+                    import time
+                    import urllib.parse
+                    # สร้างตัวเลขสุ่ม (เพื่อให้ URL เปลี่ยนทุกครั้งที่คลิก Browser จะได้ยอมรีโหลด)
+                    ts = int(time.time() * 1000) 
                     
                     # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        # แปลงตัวอักษรพิเศษให้เป็นรหัส URL เพื่อไม่ให้ลิกง์พัง
-                        import urllib.parse
                         safe_link = urllib.parse.quote(link_val)
-                        
-                        # สร้าง Link ที่สั่ง Reload หน้าเว็บพร้อมส่งค่า view_info
                         icons_html.append(
-                            f"""<a href="?view_info={safe_link}" 
+                            f"""<a href="?view_info={safe_link}&t={ts}_{idx}" 
                                    target="_self"
                                    title="คลิกเพื่อดูรายละเอียด" 
                                    style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
@@ -1161,11 +1175,9 @@ with tab2:
 
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
-                        import urllib.parse
                         safe_wechat = urllib.parse.quote(wechat_val)
-                        
                         icons_html.append(
-                            f"""<a href="?view_info={safe_wechat}" 
+                            f"""<a href="?view_info={safe_wechat}&t={ts}_{idx}" 
                                    target="_self"
                                    title="คลิกเพื่อดูรายละเอียด" 
                                    style="text-decoration:none; font-size:20px; color:#25D366;">
