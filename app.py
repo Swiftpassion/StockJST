@@ -1010,13 +1010,13 @@ with tab2:
             <th>สถานะ</th>
             <th>เลข PO</th>
             <th>ประเภทการนำเข้า</th>
-            <th>วันที่สั่งซื้อ</th>
-            <th>วันคาดการณ์</th>
-            <th style="background-color: #2c3e50;">วันที่ได้รับ</th>
-            <th>ระยะเวลา</th>
-            <th style="background-color: #2c3e50;">จำนวนที่ได้รับ</th>
-            <th style="background-color: #1a5276;">จำนวนสั่งซื้อ</th>
-            <th>ต้นทุน/ชิ้น (฿)</th>
+            <th style="background-color: #5f00bf;">วันที่สั่งซื้อ</th>
+            <th style="background-color: #5f00bf;">วันคาดการณ์</th>
+            <th style="background-color: #5f00bf;">วันที่ได้รับ</th>
+            <th style="background-color: #5f00bf;">ระยะเวลา</th>
+            <th style="background-color: #5f00bf;">จำนวนที่ได้รับ</th>
+            <th style="background-color: #00bf00;">จำนวนสั่งซื้อ</th>
+            <th style="background-color: #00bf00;">ต้นทุน/ชิ้น (฿)</th>
             <th>ยอดเงินหยวน (¥)</th>
             <th>ยอดเงินบาทที่ใช้ (฿)</th>
             <th>เรทเงิน</th>
@@ -1025,9 +1025,9 @@ with tab2:
             <th>ค่าส่ง</th>
             <th>น้ำหนัก / KG</th>
             <th>ราคา / ชิ้น (หยวน)</th>
-            <th>SHOPEE</th>
+            <th style="background-color: #ff6600;">SHOPEE</th>
             <th>LAZADA</th>
-            <th>TIKTOK</th>
+            <th style="background-color: #000000;">TIKTOK</th>
             <th>หมายเหตุ</th>
             <th>ร้านค้า</th>
         </tr></thead><tbody>"""
