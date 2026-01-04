@@ -1144,22 +1144,21 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK (ใช้ span แทน a)
+                    # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
-                        # ใช้ span และ onclick ตรงๆ (ตัด href และ target ทิ้งไปเลย)
                         icons_html.append(
-                            f"""<span onclick="openModal('{safe_link}')" 
+                            f"""<span class="pop-btn" data-value="{safe_link}" 
                                       title="{safe_link}" 
                                       style="cursor:pointer; font-size:20px; margin-right:5px; color:#007bff; display:inline-block;">
                                 🔗</span>"""
                         )
 
-                    # 2. จัดการ WeChat (ใช้ span แทน a)
+                    # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f"""<span onclick="openModal('{safe_wechat}')" 
+                            f"""<span class="pop-btn" data-value="{safe_wechat}" 
                                       title="{safe_wechat}" 
                                       style="cursor:pointer; font-size:20px; color:#25D366; display:inline-block;">
                                 💬</span>"""
@@ -1191,6 +1190,7 @@ with tab2:
         </div>
 
         <script>
+        // 1. ฟังก์ชันเปิด-ปิด Modal
         function openModal(text) {
             document.getElementById('customModal').style.display = 'block';
             var input = document.getElementById('modalInput');
@@ -1207,8 +1207,25 @@ with tab2:
                 closeModal();
             });
         }
+
+        // 2. ฟังก์ชันพิเศษ: ไล่หาปุ่มแล้วใส่คำสั่งคลิก (แก้ปัญหา Streamlit บล็อก onclick)
+        function setupPopups() {
+            const btns = document.querySelectorAll('.pop-btn');
+            btns.forEach(btn => {
+                btn.onclick = function() {
+                    openModal(this.getAttribute('data-value'));
+                };
+            });
+        }
+
+        // สั่งให้ทำงานทันที และทำซ้ำเผื่อโหลดไม่ทัน
+        setupPopups();
+        setTimeout(setupPopups, 500);
+        setTimeout(setupPopups, 1500);
         </script>
         """
+        
+        # อย่าลืมบรรทัดนี้ต้องมีเหมือนเดิม
         st.markdown(table_html + custom_modal_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
