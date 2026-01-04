@@ -567,13 +567,18 @@ def po_edit_dialog_v2():
                 if is_internal:
                     # Case: Internal -> Edit Total THB directly
                     curr_total_thb = float(get_val('Total_THB', 0))
+                    
+                    # [เพิ่มใหม่] คำนวณราคาตามสัดส่วนจำนวนที่รับ (Proportional Logic)
+                    if original_qty > 0 and qty_recv != original_qty:
+                         # ปรับราคาเริ่มต้นให้ตรงกับจำนวนที่รับจริง
+                         curr_total_thb = (curr_total_thb / original_qty) * qty_recv
+
                     new_total_thb = st.number_input("ยอดเงินบาทรวม (฿)", min_value=0.0, value=curr_total_thb, step=1.0, format="%.2f", key="e_thb_int")
                     
                     # Variables for internal
                     e_yuan = 0.0
                     e_rate = 0.0
                     e_ship_rate = 0.0
-                    
                 else:
                     # Case: Import -> Edit Yuan / Rate / ShipRate
                     f_c1, f_c2, f_c3 = st.columns(3)
@@ -1315,36 +1320,36 @@ with tab2:
         
         for group_idx, ((po, pid), group) in enumerate(grouped):
             row_count = len(group)
+            first_row = group.iloc[0] # ใช้สำหรับดึงข้อมูลทั่วไป (รูป, ชื่อ, Link)
             
-            # 1. ดึงข้อมูลแถวแรกมาเพื่อเช็ค Header
-            first_row = group.iloc[0]
-            
-            # [จุดที่แก้ 1] เช็คว่าเป็นสินค้าภายในหรือไม่?
             is_internal = (str(first_row.get('Transport_Type', '')).strip() == "สินค้าภายใน")
 
-            total_order_qty = group['Qty_Ordered'].iloc[0] 
+            # 1. คำนวณยอดรวม (Sum) ของทุกบรรทัดใน Group
+            total_order_qty = group['Qty_Ordered'].sum()
             if total_order_qty == 0: total_order_qty = 1 
-
-            # ดึงค่าเดิม
-            total_yuan = float(first_row.get('Total_Yuan', 0))
-            rate = float(first_row.get('Yuan_Rate', 0))
-            ship_cost = float(first_row.get('Ship_Cost', 0))
             
-            # [จุดที่แก้ 2] คำนวณยอดเงิน
+            total_yuan = group['Total_Yuan'].sum()
+            total_ship_cost = group['Ship_Cost'].sum()
+            
+            # 2. คำนวณยอดบาทรวม (Total THB Used)
+            calc_total_thb_used = 0
             if is_internal:
-                # ถ้าเป็นภายใน: ใช้ยอดบาทโดยตรง / ไม่สนยอดหยวน
-                calc_total_thb_used = float(first_row.get('Total_THB', 0))
-                # ต้นทุนต่อชิ้น = ยอดบาทรวม / จำนวน
-                cost_per_unit_thb = calc_total_thb_used / total_order_qty if total_order_qty > 0 else 0
-                price_per_unit_yuan = 0 # ไม่ใช้
+                calc_total_thb_used = group['Total_THB'].sum()
             else:
-                # ถ้าเป็นนำเข้า: คำนวณตามสูตรเดิม
-                calc_total_thb_used = total_yuan * rate
-                cost_per_unit_thb = (calc_total_thb_used + ship_cost) / total_order_qty
-                price_per_unit_yuan = total_yuan / total_order_qty
+                # นำเข้า: (หยวน * เรท) รวมกันทุกบรรทัด
+                for _, r in group.iterrows():
+                    calc_total_thb_used += (float(r.get('Total_Yuan',0)) * float(r.get('Yuan_Rate',0)))
+
+            # 3. ต้นทุนต่อชิ้น (รวมค่าส่ง)
+            cost_per_unit_thb = (calc_total_thb_used + total_ship_cost) / total_order_qty if total_order_qty > 0 else 0
+            
+            # ราคาหยวนต่อชิ้น (เฉลี่ย)
+            price_per_unit_yuan = total_yuan / total_order_qty if total_order_qty > 0 else 0
+
+            # ดึงค่าเรท (โชว์ของบรรทัดแรก)
+            rate = float(first_row.get('Yuan_Rate', 0))
 
             bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
-            
             s_text = first_row['Status_Text']
             s_bg = first_row['Status_BG']
             s_col = first_row['Status_Color']
@@ -1352,33 +1357,23 @@ with tab2:
             for idx, (i, row) in enumerate(group.iterrows()):
                 table_html += f'<tr style="background-color: {bg_color};">'
                 
-                # --- Merged Columns (แสดงแค่บรรทัดแรกของกลุ่ม) ---
+                # --- Merged Columns ---
                 if idx == 0:
-                    # 1. รหัสสินค้า
                     table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
                     
-                    # 2. รูปสินค้า
                     img_src = row.get('Image', '')
                     img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{img_html}</td>'
                     
-                    # 3. สถานะ
                     table_html += f'<td rowspan="{row_count}" class="td-merged"><span class="status-badge" style="background-color:{s_bg}; color:{s_col};">{s_text}</span></td>'
-
-                    # 4. เลข PO
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row["PO_Number"]}</td>'
-                    
-                    # 5. ประเภทการนำเข้า
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
-                    
-                    # 6. วันที่สั่งซื้อ
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
                     
-                    # 7. วันคาดการณ์
                     exp_d = row.get('Expected_Date')
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(exp_d)}</td>'
 
-                # --- Split Columns (แยกบรรทัดตามการรับของ) ---
+                # --- Split Columns (บรรทัดย่อย) ---
                 recv_d = fmt_date(row['Received_Date'])
                 table_html += f'<td>{recv_d}</td>'
                 
@@ -1391,62 +1386,51 @@ with tab2:
                 q_style = "color: #ff4b4b; font-weight:bold;" if (qty_recv > 0 and qty_recv != int(row.get('Qty_Ordered', 0))) else "font-weight:bold;"
                 table_html += f'<td style="{q_style}">{qty_recv:,}</td>'
 
-                # --- Merged Columns (การเงิน & รายละเอียด) ---
+                # --- Merged Columns (Financials) ---
                 if idx == 0:
-                    # 11. จำนวนสั่งซื้อ
+                    # 11. จำนวนสั่งซื้อ (ยอดรวม)
                     table_html += f'<td rowspan="{row_count}" class="td-merged" style="color:#AED6F1; font-weight:bold;">{int(total_order_qty):,}</td>'
                     
-                    # 12. ต้นทุน/ชิ้น (฿)
+                    # 12. ต้นทุน/ชิ้น (฿) (เฉลี่ย)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(cost_per_unit_thb)}</td>'
                     
-                    # [จุดที่แก้ 3] เงื่อนไขการแสดงผล "-" ถ้าเป็น Internal
-                    
-                    # 13. ยอดเงินหยวน (¥)
+                    # 13. ยอดเงินหยวน (¥) (รวม)
                     val_yuan = "-" if is_internal else fmt_num(total_yuan)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_yuan}</td>'
                     
-                    # 14. ยอดเงินบาทที่ใช้ (฿) (แสดงเสมอ)
+                    # 14. ยอดเงินบาทที่ใช้ (฿) (รวม) **จุดสำคัญ**
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(calc_total_thb_used)}</td>'
                     
-                    # 15. เรทเงิน
+                    # 15-20 (เหมือนเดิม)
                     val_rate = "-" if is_internal else fmt_num(rate)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_rate}</td>'
                     
-                    # 16. เรทค่าขนส่ง
                     val_ship_rate = "-" if is_internal else fmt_num(row.get("Ship_Rate",0))
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_ship_rate}</td>'
                     
-                    # 17. ขนาด (คิว)
                     val_cbm = "-" if is_internal else fmt_num(row.get("CBM",0), 4)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_cbm}</td>'
                     
-                    # 18. ค่าส่ง
-                    val_ship_cost = "-" if is_internal else fmt_num(ship_cost)
+                    val_ship_cost = "-" if is_internal else fmt_num(total_ship_cost)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_ship_cost}</td>'
                     
-                    # 19. น้ำหนัก / KG
                     val_weight = "-" if is_internal else fmt_num(row.get("Transport_Weight",0))
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_weight}</td>'
                     
-                    # 20. ราคา / ชิ้น (หยวน)
                     val_unit_yuan = "-" if is_internal else fmt_num(price_per_unit_yuan)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_unit_yuan}</td>'
                     
-                    # 21-23. Platforms (แสดงเสมอ)
+                    # 21-25 Other Details
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("Shopee_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("Lazada_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("TikTok_Price",0))}</td>'
-                    
-                    # 24. หมายเหตุ
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Note","")}</td>'
                     
-                    # 25. ร้านค้า (Link / WeChat)
                     link_val = str(row.get("Link", "")).strip()
                     wechat_val = str(row.get("WeChat", "")).strip()
                     
                     icons_html = []
-                    import time
-                    import urllib.parse
+                    import time, urllib.parse
                     ts = int(time.time() * 1000) 
                     
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
