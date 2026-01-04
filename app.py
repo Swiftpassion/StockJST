@@ -1144,23 +1144,25 @@ with tab2:
                     
                     icons_html = []
                     
-                    # 1. จัดการ LINK
+                    # 1. จัดการ LINK (ใช้ span แทน a)
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        safe_link = link_val.replace("'", "\\'")
-                        # ฝังคำสั่งใน href โดยตรง
+                        # Escape เครื่องหมาย ' และ " เพื่อป้องกัน JS Error
+                        safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f'<a href="javascript:prompt(\'📋 Copy Link ร้านค้า:\', \'{safe_link}\')"'
-                            f' title="{safe_link}"'
-                            f' style="text-decoration:none; font-size:20px; margin-right:5px;">🔗</a>'
+                            f"""<span onclick="prompt('📋 Copy Link:', '{safe_link}')" 
+                                      title="{safe_link}" 
+                                      style="cursor:pointer; font-size:20px; margin-right:5px; color:#007bff;">
+                                🔗</span>"""
                         )
 
-                    # 2. จัดการ WeChat
+                    # 2. จัดการ WeChat (ใช้ span แทน a)
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
-                        safe_wechat = wechat_val.replace("'", "\\'")
+                        safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
                         icons_html.append(
-                            f'<a href="javascript:prompt(\'💬 WeChat ID:\', \'{safe_wechat}\')"'
-                            f' title="{safe_wechat}"'
-                            f' style="text-decoration:none; font-size:20px; color:#25D366;">💬</a>'
+                            f"""<span onclick="prompt('💬 WeChat ID:', '{safe_wechat}')" 
+                                      title="{safe_wechat}" 
+                                      style="cursor:pointer; font-size:20px; color:#25D366;">
+                                💬</span>"""
                         )
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
