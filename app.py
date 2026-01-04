@@ -1147,86 +1147,32 @@ with tab2:
                     # 1. จัดการ LINK
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
                         safe_link = link_val.replace("'", "\\'").replace('"', '&quot;')
+                        # ใช้ <a> + javascript:void(prompt) แบบเดิมที่เคยทำงานได้
+                        # เปลี่ยนข้อความใน prompt เป็น 'รายละเอียด (Link):'
                         icons_html.append(
-                            f"""<span class="pop-btn" data-value="{safe_link}" 
-                                      title="{safe_link}" 
-                                      style="cursor:pointer; font-size:20px; margin-right:5px; color:#007bff; display:inline-block;">
-                                🔗</span>"""
+                            f"""<a href="javascript:void(prompt('รายละเอียด (Link):', '{safe_link}'))" 
+                                   target="_self"
+                                   title="{safe_link}" 
+                                   style="text-decoration:none; font-size:20px; margin-right:5px; color:#007bff;">
+                                🔗</a>"""
                         )
 
                     # 2. จัดการ WeChat
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = wechat_val.replace("'", "\\'").replace('"', '&quot;')
+                        # เปลี่ยนข้อความใน prompt เป็น 'รายละเอียด (WeChat):'
                         icons_html.append(
-                            f"""<span class="pop-btn" data-value="{safe_wechat}" 
-                                      title="{safe_wechat}" 
-                                      style="cursor:pointer; font-size:20px; color:#25D366; display:inline-block;">
-                                💬</span>"""
+                            f"""<a href="javascript:void(prompt('รายละเอียด (WeChat):', '{safe_wechat}'))" 
+                                   target="_self"
+                                   title="{safe_wechat}" 
+                                   style="text-decoration:none; font-size:20px; color:#25D366;">
+                                💬</a>"""
                         )
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
-                    # ============================================================
-                
-                table_html += "</tr>"
-        
-        table_html += "</tbody></table></div>"
-
-        # ============================================================
-        # [ส่วนที่ 2] ฝัง HTML/CSS/JS สำหรับกล่อง Modal (Pop-up สวยๆ)
-        # ============================================================
-        custom_modal_html = """
-        <div id="customModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
-            <div style="background-color:#262730; margin: 0; padding: 20px; border: 1px solid #444; width: 400px; border-radius:10px; position:absolute; top:50%; left:50%; transform: translate(-50%, -50%); box-shadow: 0 5px 15px rgba(0,0,0,0.5); text-align:center; font-family:sans-serif;">
-                <h3 style="margin-top:0; margin-bottom:15px; color:#fff; font-size:18px;">📋 ข้อมูลร้านค้า</h3>
-                
-                <input type="text" id="modalInput" style="width:100%; padding:10px; margin-bottom:20px; border-radius:5px; border:1px solid #555; background-color:#1e1e1e; color:#fff; font-size:16px; text-align:center;" readonly>
-                
-                <div style="display:flex; justify-content:center; gap:10px;">
-                    <button onclick="copyAndClose()" style="cursor:pointer; padding:8px 20px; background-color:#00C853; color:white; border:none; border-radius:5px; font-weight:bold; font-size:14px;">Copy</button>
-                    <button onclick="closeModal()" style="cursor:pointer; padding:8px 20px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; font-weight:bold; font-size:14px;">Close</button>
-                </div>
-            </div>
-        </div>
-
-        <script>
-        // 1. ฟังก์ชันเปิด-ปิด Modal
-        function openModal(text) {
-            document.getElementById('customModal').style.display = 'block';
-            var input = document.getElementById('modalInput');
-            input.value = text;
-            input.select();
-        }
-        function closeModal() {
-            document.getElementById('customModal').style.display = 'none';
-        }
-        function copyAndClose() {
-            var copyText = document.getElementById("modalInput");
-            copyText.select();
-            navigator.clipboard.writeText(copyText.value).then(() => {
-                closeModal();
-            });
-        }
-
-        // 2. ฟังก์ชันพิเศษ: ไล่หาปุ่มแล้วใส่คำสั่งคลิก (แก้ปัญหา Streamlit บล็อก onclick)
-        function setupPopups() {
-            const btns = document.querySelectorAll('.pop-btn');
-            btns.forEach(btn => {
-                btn.onclick = function() {
-                    openModal(this.getAttribute('data-value'));
-                };
-            });
-        }
-
-        // สั่งให้ทำงานทันที และทำซ้ำเผื่อโหลดไม่ทัน
-        setupPopups();
-        setTimeout(setupPopups, 500);
-        setTimeout(setupPopups, 1500);
-        </script>
-        """
-        
-        # อย่าลืมบรรทัดนี้ต้องมีเหมือนเดิม
-        st.markdown(table_html + custom_modal_html, unsafe_allow_html=True)
+                    
+        st.markdown(table_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
 # --- TAB 3: Stock ---
