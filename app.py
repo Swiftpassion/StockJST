@@ -309,7 +309,6 @@ with st.sidebar:
     st.divider()
 
     # เมนูจัดการไฟล์
-    st.image("https://img.icons8.com/cloud/100/4a90e2/google-drive.png", width=50)
     st.subheader("📂 เมนูจัดการไฟล์")
     
     st.link_button(
@@ -438,7 +437,7 @@ def show_history_dialog(fixed_product_id=None):
                 st.markdown("""
                 <style>
                     .po-table-container { overflow: auto; max-height: 75vh; }
-                    .custom-po-table { width: 100%; border-collapse: separate; font-size: 13px; color: #e0e0e0; min-width: 2000px; }
+                    .custom-po-table { width: 100%; border-collapse: separate; font-size: 12px; color: #e0e0e0; min-width: 2000px; }
                     .custom-po-table th { background-color: #1e3c72; color: white; padding: 10px; text-align: center; border-bottom: 2px solid #fff; border-right: 1px solid #4a4a4a; position: sticky; top: 0; z-index: 10; white-space: nowrap; vertical-align: middle; }
                     .custom-po-table td { padding: 8px 5px; border-bottom: 1px solid #111; border-right: 1px solid #444; vertical-align: middle; text-align: center; }
                     .td-merged { border-right: 2px solid #666 !important; background-color: inherit; }
