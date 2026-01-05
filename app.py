@@ -4,6 +4,10 @@ import io
 import json
 import time
 import calendar
+import smtplib
+import random
+import string
+from email.mime.text import MIMEText
 from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -60,7 +64,119 @@ def get_credentials():
     return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
 # ==========================================
-# 3. ฟังก์ชันจัดการข้อมูล (Data Functions)
+# 3. ระบบ AUTHENTICATION (Login & OTP)
+# ==========================================
+
+# --- ฟังก์ชันส่งอีเมล ---
+def send_otp_email(receiver_email, otp_code):
+    try:
+        sender_email = st.secrets["email"]["sender"]
+        sender_password = st.secrets["email"]["password"]
+    except KeyError:
+        st.error("❌ ไม่พบการตั้งค่า Email ใน st.secrets")
+        return False
+    
+    subject = "รหัสยืนยันตัวตน (OTP) - JST Hybrid System"
+    body = f"รหัสเข้าใช้งานของคุณคือ: {otp_code}\n\n(รหัสนี้ใช้สำหรับการเข้าสู่ระบบครั้งนี้เท่านั้น)"
+
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+
+    try:
+        # เชื่อมต่อ SMTP Gmail
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"❌ ส่งอีเมลไม่สำเร็จ: {e}")
+        return False
+
+# --- ฟังก์ชันบันทึก Log การ Login ---
+def log_login_activity(email):
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        
+        # ตรวจสอบว่ามี Tab ชื่อ LOGIN_LOG หรือยัง ถ้าไม่มีให้สร้าง
+        try:
+            ws = sh.worksheet("LOGIN_LOG")
+        except:
+            ws = sh.add_worksheet(title="LOGIN_LOG", rows="1000", cols="2")
+            ws.append_row(["Timestamp", "Email"])
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.append_row([timestamp, email])
+    except Exception as e:
+        # ไม่แสดง Error ให้ User เห็นเพื่อความราบรื่น แต่ print ลง console server ได้
+        print(f"Login Log Error: {e}")
+
+# --- Initialize Session State for Login ---
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'otp_sent' not in st.session_state: st.session_state.otp_sent = False
+if 'generated_otp' not in st.session_state: st.session_state.generated_otp = None
+if 'user_email' not in st.session_state: st.session_state.user_email = ""
+
+# --- LOGIN FLOW ---
+if not st.session_state.logged_in:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🔐 JST Hybrid System Login")
+        with st.container(border=True):
+            if not st.session_state.otp_sent:
+                # Step 1: กรอกอีเมล
+                st.info("กรุณากรอกอีเมลเพื่อรับรหัส OTP")
+                email_input = st.text_input("📧 อีเมล (Gmail)", placeholder="example@gmail.com")
+                
+                if st.button("ส่งรหัสยืนยัน (Send OTP)", type="primary"):
+                    try:
+                        allowed_users = st.secrets["access"]["allowed_users"]
+                    except KeyError:
+                        st.error("❌ ไม่พบการตั้งค่า allowed_users ใน st.secrets")
+                        st.stop()
+
+                    if email_input.strip() in allowed_users:
+                        otp = ''.join(random.choices(string.digits, k=6))
+                        st.session_state.generated_otp = otp
+                        st.session_state.user_email = email_input.strip()
+                        
+                        with st.spinner("⏳ กำลังส่งรหัสไปยังอีเมลของคุณ..."):
+                            if send_otp_email(email_input.strip(), otp):
+                                st.session_state.otp_sent = True
+                                st.toast("✅ ส่งรหัสเรียบร้อยแล้ว! โปรดเช็คอีเมล", icon="📧")
+                                st.rerun()
+                    else:
+                        st.error("⛔️ อีเมลนี้ไม่ได้รับอนุญาตให้เข้าใช้งาน")
+            else:
+                # Step 2: กรอก OTP
+                st.success(f"รหัสถูกส่งไปที่: **{st.session_state.user_email}**")
+                otp_input = st.text_input("🔑 กรอกรหัส 6 หลัก", max_chars=6, type="password")
+                
+                c_btn1, c_btn2 = st.columns(2)
+                if c_btn1.button("ยืนยันรหัส (Verify)", type="primary"):
+                    if otp_input == st.session_state.generated_otp:
+                        st.session_state.logged_in = True
+                        log_login_activity(st.session_state.user_email)
+                        st.toast("ยินดีต้อนรับ!", icon="🎉")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ รหัสไม่ถูกต้อง กรุณาลองใหม่")
+                
+                if c_btn2.button("ยกเลิก / ส่งใหม่"):
+                    st.session_state.otp_sent = False
+                    st.session_state.generated_otp = None
+                    st.rerun()
+
+    # 🛑 สำคัญ: คำสั่งนี้จะหยุดการทำงานของ Code ส่วนล่างทั้งหมดถ้ายังไม่ Login
+    st.stop()
+
+
+# ==========================================
+# 4. ฟังก์ชันจัดการข้อมูล (Data Functions) - ส่วนนี้เริ่มทำงานหลัง Login ผ่าน
 # ==========================================
 
 def highlight_negative(val):
@@ -295,8 +411,15 @@ def update_master_limits(df_edited):
         st.error(f"❌ บันทึกจุดเตือนไม่สำเร็จ: {e}")
 
 # ==========================================
-# 4. Main App & Data Loading
+# 5. Main App & Data Loading
 # ==========================================
+# แสดงชื่อผู้ใช้ที่ Login เข้ามา
+st.sidebar.markdown(f"👤 **ผู้ใช้งาน:** {st.session_state.user_email}")
+if st.sidebar.button("🚪 ออกจากระบบ"):
+    st.session_state.logged_in = False
+    st.session_state.otp_sent = False
+    st.rerun()
+
 st.title("📊 JST Hybrid Management System")
 
 # --- 2. Sidebar (เมนูซ้าย + ปุ่มรีเฟรช) ---
