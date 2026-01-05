@@ -374,7 +374,7 @@ def show_info_dialog(text_val):
 
 @st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
 def show_history_dialog(fixed_product_id=None):
-    st.markdown("""<style>div[data-testid="stDialog"] { width: 95vw !important; max-width: 95vw !important; }</style>""", unsafe_allow_html=True)
+    st.markdown("""<style>div[data-testid="stDialog"] { width: 100vw !important; max-width: 100vw !important; }</style>""", unsafe_allow_html=True)
     
     # 1. Selection Section
     selected_pid = fixed_product_id
