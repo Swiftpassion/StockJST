@@ -374,7 +374,25 @@ def show_info_dialog(text_val):
 
 @st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
 def show_history_dialog(fixed_product_id=None):
-    st.markdown("""<style>div[data-testid="stDialog"] { width: 100vw !important; max-width: 100vw !important; }</style>""", unsafe_allow_html=True)
+    # --- [เริ่ม] ส่วนที่แก้ไข: CSS บังคับขยายเต็มจอ ---
+    st.markdown("""
+    <style>
+        /* 1. บังคับตัว Dialog หลักให้กว้าง 98% ของหน้าจอ */
+        div[data-testid="stDialog"] {
+            width: 98vw !important;
+            min-width: 98vw !important;
+            max-width: 98vw !important;
+            left: 1vw !important;
+            margin: 0 !important;
+        }
+        
+        /* 2. บังคับเนื้อหาข้างในให้ขยายตาม */
+        div[data-testid="stDialog"] > div {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
     
     # 1. Selection Section
     selected_pid = fixed_product_id
