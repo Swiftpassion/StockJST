@@ -919,7 +919,7 @@ def delete_confirm_dialog():
     target_po = st.session_state.get("target_delete_po")
     
     st.warning(f"คุณต้องการลบรายการ PO: {target_po} หรือไม่?")
-    st.caption("⚠️ การกระทำนี้ไม่สามารถย้อนกลับได้ (Cannot Undo)")
+    st.caption("⚠️ การกระทำนี้ไม่สามารถย้อนกลับได้")
     
     col_yes, col_no = st.columns(2)
     if col_yes.button("✅ ยืนยันลบ", type="primary", use_container_width=True):
