@@ -8,7 +8,7 @@ import smtplib
 import random
 import string
 import hashlib
-import urllib.parse # เพิ่ม library นี้
+import urllib.parse 
 from email.mime.text import MIMEText
 from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
@@ -1166,6 +1166,9 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 else: final_report = df_master.copy()
                 
                 day_cols = [c for c in final_report.columns if c not in df_master.columns]
+                # [FIX] Clean day_cols to remove any potential garbage that might cause header artifacts
+                day_cols = [c for c in day_cols if isinstance(c, str) and "🔴" not in c]
+                
                 final_report[day_cols] = final_report[day_cols].fillna(0).astype(int)
                 
                 if selected_category != "แสดงทั้งหมด": final_report = final_report[final_report['Product_Type'] == selected_category]
@@ -1216,14 +1219,15 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     </style>
                     """, unsafe_allow_html=True)
                     
-                    # --- [FIX] Create HTML Table with Token Links ---
+                    # --- [FIX] Create HTML Table with Clean Header ---
                     curr_token = st.query_params.get("token", "")
                     
                     html_table = """
                     <div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr>
                         <th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>
                     """
-                    for day_col in sorted_day_cols: html_table += f'<th class="col-small">{day_col}</th>'
+                    for day_col in sorted_day_cols: 
+                        html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
                     
                     for idx, row in final_df.iterrows():
