@@ -1822,11 +1822,44 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             st.rerun()
 
     if not df_po.empty and not df_master.empty:
+        # ==================================================================================
+        # ✅ [STEP 1] เตรียมข้อมูลก่อน (Merge Data First)
+        # ต้องรวมข้อมูลก่อน เพื่อเอาชื่อสินค้าและ SKU มาสร้างเป็นตัวเลือกในกล่องค้นหา
+        # ==================================================================================
+        df_po_filter = df_po.copy()
+        
+        # แปลงวันที่ให้ถูกต้อง
+        if 'Order_Date' in df_po_filter.columns: df_po_filter['Order_Date'] = pd.to_datetime(df_po_filter['Order_Date'], errors='coerce')
+        if 'Received_Date' in df_po_filter.columns: df_po_filter['Received_Date'] = pd.to_datetime(df_po_filter['Received_Date'], errors='coerce')
+        if 'Expected_Date' in df_po_filter.columns: df_po_filter['Expected_Date'] = pd.to_datetime(df_po_filter['Expected_Date'], errors='coerce')
+        df_po_filter['Product_ID'] = df_po_filter['Product_ID'].astype(str)
+
+        # Merge กับ Master Data
+        df_display = pd.merge(df_po_filter, df_master[['Product_ID','Product_Name','Image','Product_Type']], on='Product_ID', how='left')
+
+        # ✅ สร้างคอลัมน์ "ตัวเลือกค้นหา" (Search Label) : PO + SKU + ชื่อสินค้า
+        df_display['Search_Label'] = df_display.apply(
+            lambda x: f"{x['PO_Number']} : {x['Product_ID']} {str(x['Product_Name'])}", axis=1
+        )
+        
+        # ดึงรายชื่อทั้งหมดมาทำเป็นตัวเลือก (เรียงลำดับล่าสุดก่อน)
+        search_options = sorted(df_display['Search_Label'].unique().tolist(), reverse=True)
+
+        # ==================================================================================
+        # ✅ [STEP 2] แสดงตัวกรอง (UI Filters)
+        # ==================================================================================
         with st.container(border=True):
             st.markdown("##### 🔍 ตัวกรองและค้นหา")
             c_search, c_status, c_cat = st.columns([2, 1.5, 1.5])
+            
             with c_search:
-                search_po_query = st.text_input("🔍 ค้นหา", placeholder="พิมพ์เลข PO, รหัส หรือ ชื่อสินค้า...")
+                # 👉 เปลี่ยนจาก text_input เป็น multiselect ตามที่คุณต้องการ
+                sel_search_items = st.multiselect(
+                    "🔍 ค้นหา (เลือกจากรายการ)", 
+                    options=search_options,
+                    placeholder="พิมพ์เลข PO, SKU หรือชื่อสินค้า..."
+                )
+                
             with c_status:
                 sel_status = st.selectbox("สถานะ:", ["ทั้งหมด", "สินค้าใกล้ถึง", "รอจัดส่ง", "สินค้าไม่ครบ", "เรียบร้อย"])
             with c_cat:
@@ -1843,45 +1876,26 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             with c_d2:
                 d_end = st.date_input("ถึง", value=date.today(), disabled=not use_date_filter)
 
-        df_po_filter = df_po.copy()
-        if 'Order_Date' in df_po_filter.columns: df_po_filter['Order_Date'] = pd.to_datetime(df_po_filter['Order_Date'], errors='coerce')
-        if 'Received_Date' in df_po_filter.columns: df_po_filter['Received_Date'] = pd.to_datetime(df_po_filter['Received_Date'], errors='coerce')
-        if 'Expected_Date' in df_po_filter.columns: df_po_filter['Expected_Date'] = pd.to_datetime(df_po_filter['Expected_Date'], errors='coerce')
-        
-        df_po_filter['Product_ID'] = df_po_filter['Product_ID'].astype(str)
-        # ... (ส่วน merge ข้อมูล df_display เดิม) ...
-        # ... (โค้ดเดิมส่วน Merge ข้อมูล) ...
-        df_display = pd.merge(df_po_filter, df_master[['Product_ID','Product_Name','Image','Product_Type']], on='Product_ID', how='left')
-        
         # ==================================================================================
-        # ✅ [แก้ไขใหม่] 1. สร้างคอลัมน์รวมข้อมูล (Search Combined)
-        # รวม: เลข PO + รหัสสินค้า + ชื่อสินค้า เข้าด้วยกันเป็นข้อความเดียว (ตัวพิมพ์เล็ก)
+        # ✅ [STEP 3] กรองข้อมูลตามที่เลือก (Filtering Logic)
         # ==================================================================================
-        df_display['Search_Combined'] = (
-            df_display['PO_Number'].astype(str).fillna('') + " " + 
-            df_display['Product_ID'].astype(str).fillna('') + " " + 
-            df_display['Product_Name'].astype(str).fillna('')
-        ).str.lower() 
+        
+        # 1. กรองตาม Search Box (Dropdown)
+        if sel_search_items:
+            df_display = df_display[df_display['Search_Label'].isin(sel_search_items)]
 
-        # ... (ส่วนกรองวันที่และ Category เดิม คงไว้เหมือนเดิม) ...
+        # 2. กรองตามวันที่ (ถ้าติ๊ก)
         if use_date_filter:
             mask_date = (df_display['Order_Date'].dt.date >= d_start) & (df_display['Order_Date'].dt.date <= d_end)
             df_display = df_display[mask_date]
+            
+        # 3. กรองตามหมวดหมู่
         if sel_cat_po != "แสดงทั้งหมด":
             df_display = df_display[df_display['Product_Type'] == sel_cat_po]
-            
-        # ==================================================================================
-        # ✅ [แก้ไขใหม่] 2. Logic การค้นหาใหม่
-        # ตรวจสอบว่าคำค้นหา (search_po_query) มีอยู่ใน 'Search_Combined' หรือไม่
-        # ==================================================================================
-        if search_po_query:
-            # แปลงคำค้นหาเป็นตัวพิมพ์เล็ก และตัดช่องว่างหน้าหลัง
-            query_lower = search_po_query.strip().lower()
-            
-            # ใช้ Logic การค้นหาแบบมีเงื่อนไข (Contains) ในคอลัมน์ที่เรารวมไว้
-            df_display = df_display[df_display['Search_Combined'].str.contains(query_lower, na=False)]
-            
-        # ==================================================================================
+
+        # 4. คำนวณสถานะและแสดงผลตาราง (Logic เดิม)
+        def get_status(row):
+             # ... (Copy ฟังก์ชัน get_status เดิมมาใส่ หรือใช้ logic เดิมด้านล่างต่อได้เลย) ...
 
         def get_status(row):
             qty_ord = float(row.get('Qty_Ordered', 0))
