@@ -1208,24 +1208,9 @@ def po_multi_item_dialog():
         ord_date = h3.date_input("วันที่สั่งซื้อ", date.today(), key="mi_ord_date")
         exp_date = h4.date_input("วันที่คาดว่าจะได้รับ", value=None, key="mi_exp_date")
 
-    # --- 2. Totals Section ---
+    # --- 2. Items Table Section (Moved Up) ---
     with st.container(border=True):
-        st.subheader("2. ยอดรวมทั้งหมด (Grand Totals)")
-        st.info("💡 กรอกยอดรวมทั้งหมดของบิลนี้ ระบบจะเฉลี่ยเข้าสินค้าแต่ละตัวตามจำนวนชิ้น")
-        
-        t1, t2, t3 = st.columns(3)
-        rate_money = t1.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="mi_rate")
-        ship_rate = t2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=6000.0, format="%.2f", key="mi_ship_rate")
-        
-        st.markdown("---")
-        c1, c2, c3 = st.columns(3)
-        grand_total_yuan = c1.number_input("ราคาหยวนทั้งหมด (¥)", min_value=0.0, step=1.0, format="%.2f", key="mi_tot_yuan")
-        grand_total_cbm = c2.number_input("คิวทั้งหมด (CBM)", min_value=0.0, step=0.001, format="%.4f", key="mi_tot_cbm")
-        grand_total_weight = c3.number_input("น้ำหนักทั้งหมด (KG)", min_value=0.0, step=0.1, format="%.2f", key="mi_tot_weight")
-
-    # --- 3. Items Table Section ---
-    with st.container(border=True):
-        st.subheader("3. รายการสินค้า")
+        st.subheader("2. รายการสินค้า")
         
         # Prepare Master Data for Dropdown
         product_options = []
@@ -1246,17 +1231,38 @@ def po_multi_item_dialog():
             use_container_width=True,
             key="mi_editor"
         )
+        
+        # Calculate Total Qty immediately for use in Section 3
+        total_qty_calculated = edited_df["จำนวน"].sum()
+
+    # --- 3. Grand Totals & Receiving Section (Restructured) ---
+    with st.container(border=True):
+        st.subheader("3. ยอดรวมทั้งหมด (Grand Totals)")
+        
+        # --- 3.1 Ordering Info ---
+        st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
+        t1, t2, t3, t4 = st.columns(4)
+        rate_money = t1.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="mi_rate")
+        ship_rate = t2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=6000.0, format="%.2f", key="mi_ship_rate")
+        grand_total_yuan = t3.number_input("ราคาหยวนทั้งหมด (¥)", min_value=0.0, step=1.0, format="%.2f", key="mi_tot_yuan")
+        note = t4.text_input("หมายเหตุ (Note)", key="mi_note")
+        
+        st.divider()
+
+        # --- 3.2 Receiving Info ---
+        st.markdown('<span style="color:#ff4b4b; font-weight:bold;">(กรอกตอนสินค้าเข้า)</span> 💡 หากกรอกจะถือว่าได้รับของแล้ว', unsafe_allow_html=True)
+        r1, r2, r3 = st.columns(3)
+        recv_date = r1.date_input("วันที่ได้รับสินค้า", value=None, key="mi_recv_date")
+        grand_total_cbm = r2.number_input("คิวทั้งหมด (Total CBM)", min_value=0.0, step=0.001, format="%.4f", key="mi_tot_cbm")
+        grand_total_weight = r3.number_input("น้ำหนักทั้งหมด (Total KG)", min_value=0.0, step=0.1, format="%.2f", key="mi_tot_weight")
 
         # --- Real-time Calculation Logic ---
-        # 1. Calculate Total Qty from Table
-        total_qty_calculated = edited_df["จำนวน"].sum()
-        
-        # 2. Calculate Unit Metrics (Average)
+        # 1. Calculate Unit Metrics (Average)
         unit_yuan = grand_total_yuan / total_qty_calculated if total_qty_calculated > 0 else 0
-        unit_cbm = grand_total_cbm / total_qty_calculated if total_qty_calculated > 0 else 0
-        unit_weight = grand_total_weight / total_qty_calculated if total_qty_calculated > 0 else 0
+        unit_cbm = grand_total_cbm / total_qty_calculated if total_qty_calculated > 0 and grand_total_cbm > 0 else 0
+        unit_weight = grand_total_weight / total_qty_calculated if total_qty_calculated > 0 and grand_total_weight > 0 else 0
 
-        # 3. Create Preview Table
+        # 2. Create Preview Table
         preview_data = []
         if total_qty_calculated > 0 and not edited_df.empty:
             for idx, row in edited_df.iterrows():
@@ -1278,18 +1284,16 @@ def po_multi_item_dialog():
                         "รวมน้ำหนัก (KG)": round(row_weight, 2)
                     })
         
-        st.markdown(f"""
-        <div style="background-color:#1e3c72; padding:10px; border-radius:5px; color:white; margin-top:10px;">
-            <b>📊 สรุปการคำนวณเฉลี่ย:</b> จำนวนสินค้าทั้งหมด <b>{total_qty_calculated:,}</b> ชิ้น<br>
-            • เฉลี่ย 1 ชิ้น = <b>{unit_yuan:,.2f}</b> หยวน<br>
-            • เฉลี่ย 1 ชิ้น = <b>{unit_cbm:,.4f}</b> CBM<br>
-            • เฉลี่ย 1 ชิ้น = <b>{unit_weight:,.2f}</b> KG
-        </div>
-        """, unsafe_allow_html=True)
-
-        if preview_data:
-            st.write("ตารางตรวจสอบความถูกต้อง (Calculated Preview):")
-            st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+        # Show Summary Box
+        if total_qty_calculated > 0:
+            st.markdown(f"""
+            <div style="background-color:#1e3c72; padding:10px; border-radius:5px; color:white; margin-top:10px;">
+                <b>📊 สรุปการคำนวณเฉลี่ย:</b> จำนวนสินค้าทั้งหมด <b>{total_qty_calculated:,}</b> ชิ้น<br>
+                • เฉลี่ย 1 ชิ้น = <b>{unit_yuan:,.2f}</b> หยวน<br>
+                • เฉลี่ย 1 ชิ้น = <b>{unit_cbm:,.4f}</b> CBM {'(รอใส่ยอดรวม)' if unit_cbm == 0 else ''}<br>
+                • เฉลี่ย 1 ชิ้น = <b>{unit_weight:,.2f}</b> KG {'(รอใส่ยอดรวม)' if unit_weight == 0 else ''}
+            </div>
+            """, unsafe_allow_html=True)
 
     # --- 4. Footer & Save ---
     with st.container(border=True):
@@ -1302,8 +1306,6 @@ def po_multi_item_dialog():
         p_s = p1.number_input("Shopee Price", min_value=0.0, key="mi_p_s")
         p_l = p2.number_input("Lazada Price", min_value=0.0, key="mi_p_l")
         p_t = p3.number_input("TikTok Price", min_value=0.0, key="mi_p_t")
-        
-        note = st.text_input("หมายเหตุ (Note)", key="mi_note")
 
     st.divider()
     
@@ -1319,8 +1321,6 @@ def po_multi_item_dialog():
             
             for item in preview_data:
                 # Calculations for DB (per row)
-                # item["รวมหยวน (¥)"] คือค่าที่เราคำนวณแยกแล้ว
-                
                 c_sku = item["SKU"]
                 c_qty = item["จำนวน"]
                 c_yuan_total = item["รวมหยวน (¥)"]
@@ -1336,24 +1336,36 @@ def po_multi_item_dialog():
                 c_unit_thb = c_thb_final_total / c_qty if c_qty > 0 else 0
                 c_unit_yuan = c_yuan_total / c_qty if c_qty > 0 else 0
 
+                # Determine Receiving Status
+                # หากมีการระบุวันที่รับของ ให้ถือว่ารับครบตามจำนวนสั่ง (Wait = DaysDiff, Qty_Recv = Qty_Ord)
+                final_recv_date_str = ""
+                final_wait_days = 0
+                final_qty_recv = 0
+                
+                if recv_date:
+                    final_recv_date_str = recv_date.strftime("%Y-%m-%d")
+                    final_qty_recv = c_qty
+                    if ord_date:
+                        final_wait_days = (recv_date - ord_date).days
+
                 # Map to Sheet Columns (ตรงตามลำดับใน Google Sheet)
                 row_data = [
                     c_sku,              # Product_ID
                     po_number,          # PO_Number
                     transport,          # Transport_Type
                     ord_date.strftime("%Y-%m-%d"), # Order_Date
-                    "",                 # Received_Date (ยังไม่รับ)
-                    0,                  # Wait Days
+                    final_recv_date_str,# Received_Date (อิงจากการกรอกด้านบน)
+                    final_wait_days,    # Wait Days
                     c_qty,              # Qty_Ordered
-                    0,                  # Qty_Received
-                    round(c_unit_thb, 2),   # Price_Unit_NoVAT (ต้นทุนบาท/ชิ้น)
-                    round(c_yuan_total, 2), # Total_Yuan (แยกตามสินค้าแล้ว) ✅
+                    final_qty_recv,     # Qty_Received (ถ้าใส่วันที่รับ = รับครบ)
+                    round(c_unit_thb, 2),   # Price_Unit_NoVAT
+                    round(c_yuan_total, 2), # Total_Yuan
                     round(c_thb_final_total, 2), # Total_THB
                     rate_money,         # Yuan_Rate
                     ship_rate,          # Ship_Rate
-                    round(c_cbm_total, 4),  # CBM (แยกตามสินค้าแล้ว) ✅
+                    round(c_cbm_total, 4),  # CBM
                     round(c_ship_cost_total, 2), # Ship_Cost
-                    round(c_weight_total, 2), # Transport_Weight (แยกตามสินค้าแล้ว) ✅
+                    round(c_weight_total, 2), # Transport_Weight
                     round(c_unit_yuan, 4),  # Unit Yuan Price
                     p_s, p_l, p_t,      # Shopee, Laz, TikTok
                     note,               # Note
