@@ -8,6 +8,7 @@ import smtplib
 import random
 import string
 import hashlib
+import urllib.parse  # เพิ่ม library นี้
 from email.mime.text import MIMEText
 from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
@@ -20,7 +21,6 @@ import gspread
 # ==========================================
 st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="📦")
 
-# CSS สำหรับปรับแต่ง Radio Button ให้หน้าตาเหมือน Tabs และตาราง
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
@@ -85,12 +85,12 @@ def get_credentials():
     return service_account.Credentials.from_service_account_file("credentials.json", scopes=scope)
 
 # ==========================================
-# 3. ระบบ AUTHENTICATION (แก้ไข Login หลุด)
+# 3. ระบบ AUTHENTICATION (Fix Login Issue)
 # ==========================================
 
 def create_token(email):
-    """สร้าง Token ง่ายๆ จาก Email เพื่อใช้จำ Session"""
-    salt = "jst_secret_salt" # เปลี่ยนเป็นอะไรก็ได้
+    """สร้าง Token รายวัน"""
+    salt = "jst_secret_salt_v2" 
     raw = f"{email}{salt}{date.today()}"
     return hashlib.md5(raw.encode()).hexdigest()
 
@@ -138,32 +138,28 @@ if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'otp_sent' not in st.session_state: st.session_state.otp_sent = False
 if 'generated_otp' not in st.session_state: st.session_state.generated_otp = None
 if 'user_email' not in st.session_state: st.session_state.user_email = ""
-if 'current_page' not in st.session_state: st.session_state.current_page = "📅 สรุปยอดขายรายวัน" # Default Page
+if 'current_page' not in st.session_state: st.session_state.current_page = "📅 สรุปยอดขายรายวัน" 
 
-# --- AUTO LOGIN LOGIC (Check URL Token) ---
-if not st.session_state.logged_in:
-    query_params = st.query_params
-    token = query_params.get("token", None)
-    
-    if token:
-        # ลองตรวจสอบ Token กับ Allowed Users
-        try:
-            allowed_users = st.secrets["access"]["allowed_users"]
-            for user in allowed_users:
-                if create_token(user) == token:
-                    st.session_state.logged_in = True
-                    st.session_state.user_email = user
-                    st.toast(f"🔙 กลับเข้าสู่ระบบอัตโนมัติ: {user}", icon="👋")
-                    break
-        except: pass
+# --- AUTO LOGIN LOGIC (FIXED) ---
+url_token = st.query_params.get("token", None)
 
-# --- TOKEN PERSISTENCE (ส่วนสำคัญที่แก้ปัญหาหลุด) ---
-# ถ้า Login อยู่ ให้ยัด Token ใส่ URL เสมอ ป้องกันการหลุดเมื่อกดปุ่มอื่น
+# ถ้ายังไม่ Login แต่มี Token ใน URL -> เช็คแล้ว Login ให้เลย
+if not st.session_state.logged_in and url_token:
+    try:
+        allowed_users = st.secrets["access"]["allowed_users"]
+        for user in allowed_users:
+            if create_token(user) == url_token:
+                st.session_state.logged_in = True
+                st.session_state.user_email = user
+                st.toast(f"🔙 กลับเข้าสู่ระบบอัตโนมัติ: {user}", icon="👋")
+                break
+    except: pass
+
+# ถ้า Login แล้ว -> ให้แน่ใจว่า Token ติดอยู่ใน URL เสมอ
 if st.session_state.logged_in:
-    current_token = create_token(st.session_state.user_email)
-    # ใส่ Token ถ้ายังไม่มี หรือถ้า Token เปลี่ยน
-    if st.query_params.get("token") != current_token:
-        st.query_params["token"] = current_token
+    current_valid_token = create_token(st.session_state.user_email)
+    if url_token != current_valid_token:
+        st.query_params["token"] = current_valid_token
 
 # --- LOGIN FORM ---
 if not st.session_state.logged_in:
@@ -287,7 +283,7 @@ def get_po_data():
 
         if not df.empty:
             df['Sheet_Row_Index'] = range(2, len(df) + 2)
-            for col in ['Qty_Ordered', 'Qty_Received', 'Total_Yuan', 'Yuan_Rate']:
+            for col in ['Qty_Ordered', 'Qty_Received', 'Total_Yuan', 'Yuan_Rate', 'Total_THB']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
@@ -502,16 +498,13 @@ def show_info_dialog(text_val):
     st.info("💡 สามารถกดปุ่ม Copy มุมขวาบนของกล่องข้อความได้เลย")
     st.code(text_val, language="text") 
     
-    # แก้ไข: ปุ่มปิดหน้าต่าง (Close Button) ที่ไม่ลบ Token
+    # --- Fix: Close button maintains token ---
     if st.button("❌ ปิดหน้าต่าง", type="primary", use_container_width=True):
-        # ลบเฉพาะ parameter ที่ไม่จำเป็น
         if "view_info" in st.query_params: del st.query_params["view_info"]
         if "t" in st.query_params: del st.query_params["t"]
-        
-        # ตรวจสอบว่ามี Token อยู่ไหม ถ้าไม่มีให้เติม
+        # Ensure token stays
         if "token" not in st.query_params and st.session_state.logged_in:
              st.query_params["token"] = create_token(st.session_state.user_email)
-             
         st.rerun()
 
 @st.dialog("📜 ประวัติการสั่งซื้อสินค้า", width="large")
@@ -658,12 +651,16 @@ def show_history_dialog(fixed_product_id=None):
                             wechat_val = str(row.get("WeChat", "")).strip()
                             icons_html = []
                             import urllib.parse
+                            
+                            # --- Fix Link Token ---
+                            curr_token = st.query_params.get("token", "")
+                            
                             if link_val and link_val.lower() not in ['nan', 'none', '']:
                                 safe_link = urllib.parse.quote(link_val)
-                                icons_html.append(f"""<a href="?view_info={safe_link}" target="_self" style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">🔗</a>""")
+                                icons_html.append(f"""<a href="?view_info={safe_link}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">🔗</a>""")
                             if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                                 safe_wechat = urllib.parse.quote(wechat_val)
-                                icons_html.append(f"""<a href="?view_info={safe_wechat}" target="_self" style="text-decoration:none; font-size:16px; color:#25D366;">💬</a>""")
+                                icons_html.append(f"""<a href="?view_info={safe_wechat}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; color:#25D366;">💬</a>""")
                             table_html += f'<td rowspan="{row_count}" class="td-merged">{"".join(icons_html) if icons_html else "-"}</td>'
                         table_html += "</tr>"
                 table_html += "</tbody></table></div>"
@@ -1074,7 +1071,7 @@ def po_internal_batch_dialog():
                 st.rerun()
 
 # ==========================================
-# 6. NAVIGATION & LOGIC
+# 6. NAVIGATION & LOGIC (แก้ไขตรงนี้เพื่อแก้หน้าเด้ง)
 # ==========================================
 
 # ใช้ st.radio แทน st.tabs เพื่อให้ State จำค่าได้
@@ -1100,10 +1097,14 @@ all_years = [today.year - i for i in range(3)]
 # --- Page 1 (Daily Sales) ---
 if st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
     st.subheader("📅 สรุปยอดขายรายวัน")
+    
+    # ----------------------------
+    # FIX: รับ history_pid จาก URL แล้วเปิด Dialog โดยไม่ลบ Token
+    # ----------------------------
     if "history_pid" in st.query_params:
-        hist_pid = st.query_params["history_pid"]
-        st.query_params.clear() 
-        show_history_dialog(fixed_product_id=hist_pid)
+        pid = st.query_params["history_pid"]
+        del st.query_params["history_pid"] # Clear query but persist session
+        show_history_dialog(fixed_product_id=pid)
 
     def update_m_dates():
         y = st.session_state.m_y
@@ -1200,26 +1201,6 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     st.divider()
                     st.markdown(f"**📊 แสดงผล:** ({len(final_df)} รายการ)")
                     
-                    st.markdown("""
-                    <style>
-                        .daily-sales-table-wrapper { overflow: auto; width: 100%; max-height: 800px; margin-top: 10px; background: #1c1c1c; border-radius: 8px; border: 1px solid #444; }
-                        .daily-sales-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: 'Sarabun', sans-serif; font-size: 11px; color: #ddd; }
-                        .daily-sales-table th, .daily-sales-table td { padding: 4px 6px; line-height: 1.2; text-align: center; border-bottom: 1px solid #333; border-right: 1px solid #333; white-space: nowrap; vertical-align: middle; }
-                        .daily-sales-table thead th { position: sticky; top: 0; z-index: 100; background-color: #1e3c72 !important; color: white !important; font-weight: 700; border-bottom: 2px solid #ffffff !important; min-height: 40px; }
-                        .daily-sales-table tbody tr:nth-child(even) td { background-color: #262626 !important; }
-                        .daily-sales-table tbody tr:nth-child(odd) td { background-color: #1c1c1c !important; }
-                        .daily-sales-table tbody tr:hover td { background-color: #333 !important; }
-                        .negative-value { color: #FF0000 !important; font-weight: bold !important; }
-                        .col-history { width: 50px !important; min-width: 50px !important; }
-                        .col-small { width: 90px !important; min-width: 90px !important; }
-                        .col-medium { width: 90px !important; min-width: 90px !important; }
-                        .col-image { width: 55px !important; min-width: 55px !important; }
-                        .col-name { width: 150px !important; min-width: 150px !important; text-align: left !important; }
-                        a.history-link { text-decoration: none; color: white; font-size: 16px; cursor: pointer; }
-                        a.history-link:hover { transform: scale(1.2); }
-                    </style>
-                    """, unsafe_allow_html=True)
-                    
                     html_table = """
                     <div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr>
                         <th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>
@@ -1227,9 +1208,16 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     for day_col in sorted_day_cols: html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
                     
+                    # Token for history link
+                    curr_token = st.query_params.get("token", "")
+                    
                     for idx, row in final_df.iterrows():
                         current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
-                        html_table += f'<tr><td class="col-history"><a class="history-link" href="?history_pid={row["Product_ID"]}" target="_self">📜</a></td>'
+                        
+                        # --- FIX: Attach token to history link ---
+                        h_link = f"?history_pid={row['Product_ID']}&token={curr_token}"
+                        
+                        html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
                         if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
                             html_table += f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>'
@@ -1270,27 +1258,29 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         with st.container(border=True):
             st.markdown("##### 🔍 ตัวกรองและค้นหา")
             
-            c_search, c_status = st.columns([2, 2])
+            # New Layout: Search Box + Status Filter + Category Filter
+            c_search, c_status, c_cat = st.columns([2, 1.5, 1.5])
+            
             with c_search:
                 search_po_query = st.text_input("🔍 ค้นหา (เลข PO / รหัสสินค้า)", placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
+            
             with c_status:
                 sel_status = st.selectbox("สถานะ:", ["ทั้งหมด", "สินค้าใกล้ถึง", "รอจัดส่ง", "สินค้าไม่ครบ", "ได้รับสินค้าเรียบร้อย"])
+                
+            with c_cat:
+                all_types = ["แสดงทั้งหมด"]
+                if not df_master.empty and 'Product_Type' in df_master.columns:
+                    all_types += sorted(df_master['Product_Type'].astype(str).unique().tolist())
+                sel_cat_po = st.selectbox("หมวดหมู่สินค้า", all_types, key="po_cat_filter")
             
-            st.divider()
-            
-            # New Date Filter (Optional)
-            c_check, c_d1, c_d2, c_cat = st.columns([1, 1.5, 1.5, 1.5])
+            # Optional Date Filter
+            c_check, c_d1, c_d2 = st.columns([1, 1.5, 1.5])
             with c_check:
                 use_date_filter = st.checkbox("📅 กรองตามวันที่", value=False)
             with c_d1:
                 d_start = st.date_input("ตั้งแต่", value=date.today().replace(day=1), disabled=not use_date_filter)
             with c_d2:
                 d_end = st.date_input("ถึง", value=date.today(), disabled=not use_date_filter)
-            with c_cat:
-                all_types = ["แสดงทั้งหมด"]
-                if not df_master.empty and 'Product_Type' in df_master.columns:
-                    all_types += sorted(df_master['Product_Type'].astype(str).unique().tolist())
-                sel_cat_po = st.selectbox("หมวดหมู่สินค้า", all_types, key="po_cat_filter")
 
         # --- Prepare Data ---
         df_po_filter = df_po.copy()
@@ -1344,24 +1334,34 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         # Sort: Newest Date First -> then PO Number Descending
         df_display = df_display.sort_values(by=['Order_Date', 'PO_Number', 'Product_ID'], ascending=[False, False, False])
         
-        # --- HTML Table Construction ---
-        st.markdown("""
-        <style>
-            .po-table-container { overflow-x: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-top: 10px; }
-            .custom-po-table { width: 100%; border-collapse: separate; font-size: 13px; color: #e0e0e0; min-width: 2200px; }
-            .custom-po-table th { background-color: #1e3c72; color: white; padding: 10px; text-align: center; border-bottom: 2px solid #fff; border-right: 1px solid #4a4a4a; position: sticky; top: 0; white-space: nowrap; vertical-align: middle;}
-            .custom-po-table td { padding: 8px 5px; border-bottom: 1px solid #111; border-right: 1px solid #444; vertical-align: middle; text-align: center; }
-            .td-merged { border-right: 2px solid #666 !important; background-color: inherit; }
-            .status-badge { padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; display: inline-block; width: 120px;}
-        </style>
-        """, unsafe_allow_html=True)
-
+        # --- HTML Table Construction (FULL ORIGINAL TABLE) ---
         table_html = """
         <div class="po-table-container"><table class="custom-po-table"><thead><tr>
-            <th>รหัสสินค้า</th><th>รูปสินค้า</th><th>สถานะ</th><th>เลข PO</th><th>ประเภทการนำเข้า</th>
-            <th style="background-color: #5f00bf;">วันที่สั่งซื้อ</th><th style="background-color: #5f00bf;">วันคาดการณ์</th><th style="background-color: #5f00bf;">วันที่ได้รับ</th><th style="background-color: #5f00bf;">ระยะเวลา</th><th style="background-color: #5f00bf;">จำนวนที่ได้รับ</th>
-            <th style="background-color: #00bf00;">จำนวนสั่งซื้อ</th><th style="background-color: #00bf00;">ต้นทุน/ชิ้น (฿)</th><th>ยอดเงินหยวน (¥)</th><th>ยอดเงินบาทที่ใช้ (฿)</th><th>เรทเงิน</th><th>เรทค่าขนส่ง</th><th>ขนาด (คิว)</th><th>ค่าส่ง</th><th>น้ำหนัก / KG</th><th>ราคา / ชิ้น (หยวน)</th>
-            <th style="background-color: #ff6600;">SHOPEE</th><th>LAZADA</th><th style="background-color: #000000;">TIKTOK</th><th>หมายเหตุ</th><th>ร้านค้า</th>
+            <th>รหัสสินค้า</th>
+            <th>รูปสินค้า</th>
+            <th>สถานะ</th>
+            <th>เลข PO</th>
+            <th>ประเภทการนำเข้า</th>
+            <th style="background-color: #5f00bf;">วันที่สั่งซื้อ</th>
+            <th style="background-color: #5f00bf;">วันคาดการณ์</th>
+            <th style="background-color: #5f00bf;">วันที่ได้รับ</th>
+            <th style="background-color: #5f00bf;">ระยะเวลา</th>
+            <th style="background-color: #5f00bf;">จำนวนที่ได้รับ</th>
+            <th style="background-color: #00bf00;">จำนวนสั่งซื้อ</th>
+            <th style="background-color: #00bf00;">ต้นทุน/ชิ้น (฿)</th>
+            <th>ยอดเงินหยวน (¥)</th>
+            <th>ยอดเงินบาทที่ใช้ (฿)</th>
+            <th>เรทเงิน</th>
+            <th>เรทค่าขนส่ง</th>
+            <th>ขนาด (คิว)</th>
+            <th>ค่าส่ง</th>
+            <th>น้ำหนัก / KG</th>
+            <th>ราคา / ชิ้น (หยวน)</th>
+            <th style="background-color: #ff6600;">SHOPEE</th>
+            <th>LAZADA</th>
+            <th style="background-color: #000000;">TIKTOK</th>
+            <th>หมายเหตุ</th>
+            <th>ร้านค้า</th>
         </tr></thead><tbody>"""
 
         def fmt_date(d): return d.strftime("%d/%m/%Y") if pd.notna(d) and str(d) != 'NaT' else "-"
@@ -1369,22 +1369,30 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             try: return f"{float(val):,.{dec}f}"
             except: return "0.00"
 
+        # Token for links
+        curr_token = st.query_params.get("token", "")
+
         grouped = df_display.groupby(['PO_Number', 'Product_ID'], sort=False)
         for group_idx, ((po, pid), group) in enumerate(grouped):
             row_count = len(group)
             first_row = group.iloc[0] 
             is_internal = (str(first_row.get('Transport_Type', '')).strip() == "สินค้าภายใน")
+
             total_order_qty = group['Qty_Ordered'].sum()
             if total_order_qty == 0: total_order_qty = 1 
             total_yuan = group['Total_Yuan'].sum()
             total_ship_cost = group['Ship_Cost'].sum()
             calc_total_thb_used = 0
-            if is_internal: calc_total_thb_used = group['Total_THB'].sum()
+            if is_internal:
+                calc_total_thb_used = group['Total_THB'].sum()
             else:
-                for _, r in group.iterrows(): calc_total_thb_used += (float(r.get('Total_Yuan',0)) * float(r.get('Yuan_Rate',0)))
+                for _, r in group.iterrows():
+                    calc_total_thb_used += (float(r.get('Total_Yuan',0)) * float(r.get('Yuan_Rate',0)))
+
             cost_per_unit_thb = (calc_total_thb_used + total_ship_cost) / total_order_qty if total_order_qty > 0 else 0
             price_per_unit_yuan = total_yuan / total_order_qty if total_order_qty > 0 else 0
             rate = float(first_row.get('Yuan_Rate', 0))
+
             bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
             s_text = first_row['Status_Text']
             s_bg = first_row['Status_BG']
@@ -1406,10 +1414,12 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
 
                 recv_d = fmt_date(row['Received_Date'])
                 table_html += f'<td>{recv_d}</td>'
+                
                 wait_val = "-"
                 if pd.notna(row['Received_Date']) and pd.notna(row['Order_Date']):
                     wait_val = f"{(row['Received_Date'] - row['Order_Date']).days} วัน"
                 table_html += f'<td>{wait_val}</td>'
+
                 qty_recv = int(row.get('Qty_Received', 0))
                 q_style = "color: #ff4b4b; font-weight:bold;" if (qty_recv > 0 and qty_recv != int(row.get('Qty_Ordered', 0))) else "font-weight:bold;"
                 table_html += f'<td style="{q_style}">{qty_recv:,}</td>'
@@ -1436,19 +1446,23 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("Lazada_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("TikTok_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Note","")}</td>'
+                    
+                    # --- FIX LINK WITH TOKEN ---
                     link_val = str(row.get("Link", "")).strip()
                     wechat_val = str(row.get("WeChat", "")).strip()
                     icons_html = []
-                    import time, urllib.parse
-                    ts = int(time.time() * 1000) 
+                    
                     if link_val and link_val.lower() not in ['nan', 'none', '']:
                         safe_link = urllib.parse.quote(link_val)
-                        icons_html.append(f"""<a href="?view_info={safe_link}&t={ts}_{idx}" target="_self" style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">🔗</a>""")
+                        icons_html.append(f"""<a href="?view_info={safe_link}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">🔗</a>""")
+
                     if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
                         safe_wechat = urllib.parse.quote(wechat_val)
-                        icons_html.append(f"""<a href="?view_info={safe_wechat}&t={ts}_{idx}" target="_self" style="text-decoration:none; font-size:16px; color:#25D366;">💬</a>""")
+                        icons_html.append(f"""<a href="?view_info={safe_wechat}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; color:#25D366;">💬</a>""")
+                    
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
+
         st.markdown(table_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
@@ -1513,6 +1527,9 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
         )
     else: st.warning("ไม่พบข้อมูล Master Product")
 
+# ==========================================
+# EXECUTE DIALOGS (Place at the end)
+# ==========================================
 if st.session_state.active_dialog == "po_batch": po_batch_dialog()
 elif st.session_state.active_dialog == "po_internal": po_internal_batch_dialog()
 elif st.session_state.active_dialog == "po_search": po_edit_dialog_v2() 
