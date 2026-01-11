@@ -1532,7 +1532,7 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         # ปรับ columns เป็น 4 ช่อง
         b1, b2, b3, b4 = st.columns(4) 
         
-        if b1.button("➕ PO (Batch)", type="primary", use_container_width=True): 
+        if b1.button("➕ PO สินค้านำเข้า", type="primary", use_container_width=True): 
             st.session_state.active_dialog = "po_batch"
             st.rerun()
             
