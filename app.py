@@ -831,23 +831,15 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
 
             # --- Calculation Logic (เฉพาะแถวที่กำลังแก้) ---
             # 1. คำนวณ CBM/Weight ของ "รายการนี้" ก่อน (เพื่อใช้บันทึกเฉพาะแถวนี้)
-            # ถ้าติ๊ก apply_avg_to_all เดี๋ยวเราไปคำนวณใหม่ตอนกดปุ่ม Save อีกที
-            # แต่ถ้าไม่ติ๊ก หรือเป็น Internal ก็ใช้ logic เดิม
-            
             calc_qty_base = new_qty_ordered if new_qty_ordered > 0 else 1
             row_cbm_val = float(get_val('CBM', 0)) # ค่าเดิม
             row_weight_val = float(get_val('Transport_Weight', 0)) # ค่าเดิม
             
             if not is_internal and apply_avg_to_all:
-                # ถ้าจะเกลี่ย ให้คำนวณแบบคร่าวๆ ของแถวนี้ไปก่อน
-                # (แต่ของจริงต้องดึง Total Qty ของทั้ง PO มาหาร ซึ่งซับซ้อนกว่า เดี๋ยวไปทำตอน Save)
-                # เพื่อความง่ายใน UI: คำนวณตามสัดส่วน Qty ของแถวนี้ เทียบกับ Qty ทั้ง PO
-                # ต้องหา Total Qty ของ PO นี้ก่อน
+                # Logic: (Qty ของแถวนี้ / Total Qty ทั้ง PO) * ยอดรวม CBM
                 total_qty_po = current_po_rows['Qty_Ordered'].sum() if not current_po_rows.empty else calc_qty_base
                 if total_qty_po == 0: total_qty_po = 1
                 
-                # Logic: (Qty ของแถวนี้ / Total Qty ทั้ง PO) * ยอดรวม CBM
-                # *หมายเหตุ: ถ้าแก้ Qty ด้วย ค่านี้อาจเพี้ยนเล็กน้อย แต่ยอมรับได้
                 ratio = new_qty_ordered / total_qty_po 
                 row_cbm_val = total_cbm_input * ratio
                 row_weight_val = total_weight_input * ratio
@@ -871,10 +863,8 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                 
                 # === กรณีต้องการกระจายยอด CBM/Weight (Recalculate All Items in PO) ===
                 if not is_internal and apply_avg_to_all and not current_po_rows.empty:
-                    # 1. หา Total Qty ใหม่ของทั้ง PO (รวมตัวที่กำลังแก้ด้วย)
-                    # เราต้องสร้าง DataFrame จำลองที่ update ค่า Qty ของแถวปัจจุบันแล้ว
+                    # 1. หา Total Qty ใหม่ของทั้ง PO
                     temp_df = current_po_rows.copy()
-                    # อัปเดต Qty ของแถวปัจจุบันใน temp_df
                     temp_df.loc[temp_df['Product_ID'] == pid_current, 'Qty_Ordered'] = new_qty_ordered
                     
                     final_total_qty_po = temp_df['Qty_Ordered'].sum()
@@ -891,12 +881,10 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                         
                         # แยก Case: แถวปัจจุบัน vs แถวอื่น
                         if r_pid == pid_current:
-                            # ใช้ข้อมูลจาก Form ใหม่
                             curr_qty = new_qty_ordered
                             curr_recv_qty = new_qty_recv
                             curr_tot_yuan = new_total_yuan_full
                         else:
-                            # ใช้ข้อมูลเดิม
                             curr_qty = r['Qty_Ordered']
                             curr_recv_qty = r['Qty_Received']
                             curr_tot_yuan = r['Total_Yuan']
@@ -908,7 +896,6 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                         
                         # คำนวณ THB Total & Unit Cost ใหม่
                         if is_internal:
-                            # Internal ไม่ยุ่งกับ CBM/Weight/Yuan
                             pass 
                         else:
                             # External
@@ -918,43 +905,71 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                             new_row_unit_thb = new_row_total_thb / curr_qty if curr_qty > 0 else 0
                             new_row_unit_yuan = curr_tot_yuan / curr_qty if curr_qty > 0 else 0
                             
-                            # สร้าง List ข้อมูลที่จะบันทึก (เรียงตาม Column Google Sheet)
-                            # ต้องระวังเรื่องวันรับของ (Recv Date) ถ้าเป็นแถวอื่นที่ไม่ใช่ตัวแก้ ให้ใช้ค่าเดิม
-                            this_recv_date_str = r['Received_Date'].strftime("%Y-%m-%d") if pd.notna(r['Received_Date']) else ""
-                            this_wait_days = r.get('Wait_Days', 0) # ไม่มี column นี้ใน df_po ปกติ (ต้องระวัง)
-                            if pd.notna(r['Received_Date']) and pd.notna(r['Order_Date']):
-                                this_wait_days = (r['Received_Date'] - r['Order_Date']).days
+                            # --- FIX: จัดการเรื่องวันที่ (ป้องกัน String/Date Error) ---
+                            raw_recv = r.get('Received_Date')
+                            this_recv_date_str = ""
+                            if pd.notna(raw_recv) and str(raw_recv).strip() != "":
+                                if isinstance(raw_recv, str):
+                                    this_recv_date_str = raw_recv
+                                elif hasattr(raw_recv, "strftime"):
+                                    this_recv_date_str = raw_recv.strftime("%Y-%m-%d")
+                                else:
+                                    this_recv_date_str = str(raw_recv)
+
+                            this_wait_days = r.get('Wait_Days', 0)
                             
-                            # ถ้าเป็นแถวปัจจุบัน ให้ใช้ค่าจาก Form
-                            if r_pid == pid_current:
-                                this_recv_date_str = new_recv_date.strftime("%Y-%m-%d")
-                                if new_ord_date: this_wait_days = (new_recv_date - new_ord_date).days
-                            
+                            # คำนวณ Wait Days ใหม่เฉพาะถ้ามีข้อมูลครบ
+                            try:
+                                if r_pid == pid_current:
+                                    this_recv_date_str = new_recv_date.strftime("%Y-%m-%d")
+                                    if new_ord_date: this_wait_days = (new_recv_date - new_ord_date).days
+                                elif pd.notna(raw_recv) and pd.notna(r.get('Order_Date')):
+                                    # พยายามแปลงเป็น Datetime เพื่อคำนวณวัน
+                                    d_recv = pd.to_datetime(raw_recv, errors='coerce')
+                                    d_ord = pd.to_datetime(r['Order_Date'], errors='coerce')
+                                    if pd.notna(d_recv) and pd.notna(d_ord):
+                                        this_wait_days = (d_recv - d_ord).days
+                            except:
+                                pass # ถ้าคำนวณไม่ได้ ให้ใช้ค่าเดิม
+
+                            # จัดการ Expected Date (ป้องกัน Error เหมือนกัน)
+                            raw_exp = r.get('Expected_Date')
+                            exp_date_str = ""
+                            if pd.notna(raw_exp) and str(raw_exp).strip() != "":
+                                if hasattr(raw_exp, "strftime"): exp_date_str = raw_exp.strftime("%Y-%m-%d")
+                                else: exp_date_str = str(raw_exp)
+
                             # Construct Data List
                             data_row = [
                                 r_pid, new_po, new_trans, new_ord_date.strftime("%Y-%m-%d"),
                                 this_recv_date_str, this_wait_days, curr_qty, curr_recv_qty,
                                 round(new_row_unit_thb, 2), round(curr_tot_yuan, 2), round(new_row_total_thb, 2),
                                 new_rate, new_ship_rate, round(new_row_cbm, 4), round(new_row_ship_cost, 2), round(new_row_weight, 2), round(new_row_unit_yuan, 4),
-                                new_shopee if r_pid == pid_current else r['Shopee_Price'], 
-                                new_lazada if r_pid == pid_current else r['Lazada_Price'], 
-                                new_tiktok if r_pid == pid_current else r['TikTok_Price'], 
-                                new_note if r_pid == pid_current else r['Note'], 
-                                new_link if r_pid == pid_current else r['Link'], 
-                                new_wechat if r_pid == pid_current else r['WeChat'], 
-                                r['Expected_Date'].strftime("%Y-%m-%d") if pd.notna(r['Expected_Date']) else ""
+                                new_shopee if r_pid == pid_current else r.get('Shopee_Price',0), 
+                                new_lazada if r_pid == pid_current else r.get('Lazada_Price',0), 
+                                new_tiktok if r_pid == pid_current else r.get('TikTok_Price',0), 
+                                new_note if r_pid == pid_current else r.get('Note',''), 
+                                new_link if r_pid == pid_current else r.get('Link',''), 
+                                new_wechat if r_pid == pid_current else r.get('WeChat',''), 
+                                exp_date_str
                             ]
                             rows_to_update_batch.append({"idx": r_idx, "data": data_row})
 
                 # === กรณีปกติ (แก้แค่แถวเดียว หรือ Internal) ===
                 else:
-                    # Logic: สัดส่วนยอดรับ (สำหรับการ Split แถว ถ้ามี)
                     recv_ratio = new_qty_recv / calc_qty_base
                     rem_qty = new_qty_ordered - new_qty_recv
                     
                     # Data สำหรับแถวที่รับ (Received Row)
                     recv_yuan = new_total_yuan_full * recv_ratio 
                     
+                    # Safely Format Expected Date
+                    exp_date_val = get_val('Expected_Date', '')
+                    exp_date_str = ""
+                    if pd.notna(exp_date_val) and str(exp_date_val).strip() != "":
+                        if hasattr(exp_date_val, "strftime"): exp_date_str = exp_date_val.strftime("%Y-%m-%d")
+                        else: exp_date_str = str(exp_date_val)
+
                     if is_internal:
                         recv_total_thb = new_total_thb_full * recv_ratio
                         data_recv = [
@@ -963,7 +978,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                             round(unit_thb_cost, 2), 0, round(recv_total_thb, 2),
                             0, 0, 0, 0, 0, 0,
                             new_shopee, new_lazada, new_tiktok, new_note, new_link, new_wechat, 
-                            get_val('Expected_Date', '')
+                            exp_date_str
                         ]
                     else:
                         recv_total_thb = (recv_yuan * new_rate) + final_ship_cost_row
@@ -973,7 +988,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                             round(unit_thb_cost, 2), round(recv_yuan, 2), round(recv_total_thb, 2),
                             new_rate, new_ship_rate, round(row_cbm_val, 4), round(final_ship_cost_row, 2), round(row_weight_val, 2), round(unit_yuan, 4),
                             new_shopee, new_lazada, new_tiktok, new_note, new_link, new_wechat,
-                            get_val('Expected_Date', '')
+                            exp_date_str
                         ]
                     
                     # กรณี Split (ถ้าของมาไม่ครบ และไม่ได้กดกระจายยอด)
@@ -990,7 +1005,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                             0, round(rem_yuan, 2), round(rem_total_thb, 2),
                             new_rate, new_ship_rate, round(rem_cbm, 4), 0, 0, 0,
                             new_shopee, new_lazada, new_tiktok, f"รอรับส่วนที่เหลือ ({rem_qty})", new_link, new_wechat,
-                            get_val('Expected_Date', '')
+                            exp_date_str
                         ]
                         # บันทึกแบบ Split
                         save_po_edit_split(row_index, data_rem, data_recv)
@@ -1019,6 +1034,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     st.rerun()
                 else:
                     st.error("❌ เกิดข้อผิดพลาดในการบันทึก")
+                    
 @st.dialog("⚠️ ยืนยันการลบ", width="small")
 def delete_confirm_dialog():
     st.warning(f"คุณต้องการลบรายการ PO: {st.session_state.get('target_delete_po')} ใช่หรือไม่?")
