@@ -660,12 +660,13 @@ def show_history_dialog(fixed_product_id=None):
             else: st.warning("❌ ไม่พบประวัติการสั่งซื้อสำหรับสินค้านี้")
         else: st.warning("❌ ยังไม่มีข้อมูล PO ในระบบ")
 
-@st.dialog("📝 บันทึกรับของ / แก้ไข PO", width="large")
+@st.dialog("📝 แก้ไขข้อมูล PO / บันทึกรับของ (Full Edit)", width="large")
 def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
     selected_row, row_index = None, None
     po_map = {}
     po_map_key = {}
     
+    # --- 1. เตรียมข้อมูลสำหรับค้นหา ---
     if not df_po.empty:
         for idx, row in df_po.iterrows():
             qty_ord = int(row.get('Qty_Ordered', 0))
@@ -674,13 +675,11 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
             status_icon = "✅ รับแล้ว" if is_received else ("✅ ครบ/ปิด" if qty_ord <= 0 else "⏳ รอของ")
             display_text = f"[{status_icon}] {row.get('PO_Number','-')} : {row.get('Product_ID','-')} (สั่ง: {qty_ord})"
             
-            # Key for dropdown
             po_map[display_text] = row
-            # Key for direct link match
             key_id = (str(row.get('PO_Number', '')), str(row.get('Product_ID', '')))
             po_map_key[key_id] = row
 
-    # Try to load from pre-selected (Direct Edit)
+    # --- 2. Logic การเลือกรายการ (Direct Link หรือ ค้นหาเอง) ---
     if pre_selected_po and pre_selected_pid:
         target_key = (str(pre_selected_po), str(pre_selected_pid))
         if target_key in po_map_key:
@@ -689,137 +688,201 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
         else:
             st.error("❌ ไม่พบรายการที่เลือก (อาจมีการเปลี่ยนแปลงข้อมูล)")
 
-    # Fallback to Manual Search if no direct selection
     if selected_row is None:
-        st.caption("📦 เลือกรายการ -> ระบุจำนวนที่ได้รับจริง -> บันทึก")
+        st.caption("🔍 ค้นหารายการที่ต้องการแก้ไข หรือ รับของ")
         sorted_keys = sorted([k for k in po_map.keys() if isinstance(k, str)], key=lambda x: "⏳" not in x)
-        search_key = st.selectbox("🔍 ค้นหารายการ", options=sorted_keys, index=None, placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
+        search_key = st.selectbox("เลือกรายการ", options=sorted_keys, index=None, placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
         if search_key:
             selected_row = po_map[search_key]
             if 'Sheet_Row_Index' in selected_row: row_index = selected_row['Sheet_Row_Index']
             
     st.divider()
 
+    # --- 3. แสดง Form แก้ไขข้อมูล ---
     if selected_row is not None and row_index is not None:
         def get_val(col, default): return selected_row.get(col, default)
-        original_qty = int(get_val('Qty_Ordered', 1))
-        trans_type = str(get_val('Transport_Type', '')).strip()
-        is_internal = (trans_type == "สินค้าภายใน")
-        try: d_ord = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
-        except: d_ord = date.today()
         
+        # ดึงค่าเดิมมาตั้งต้น
+        pid_current = str(get_val('Product_ID', '')).strip()
+        pname = get_val('Product_Name', '')
+        
+        # แสดงรูปและชื่อสินค้า (แก้ไขไม่ได้ เป็น Reference)
         with st.container(border=True):
-            pid_current = str(get_val('Product_ID', '')).strip()
+            c_img, c_detail = st.columns([1, 4])
             img_url = get_val('Image', '')
-            pname = get_val('Product_Name', '')
             if not df_master.empty:
                 m_row = df_master[df_master['Product_ID'] == pid_current]
                 if not m_row.empty: 
                     img_url = m_row.iloc[0].get('Image', img_url)
                     pname = m_row.iloc[0].get('Product_Name', pname)
-            c1, c2 = st.columns([1, 4])
-            if img_url: c1.image(img_url, width=100)
-            else: c1.info("No Image")
-            c2.markdown(f"### {pid_current}")
-            c2.markdown(f"**ชื่อ:** {pname}")
-            c2.caption(f"PO: {get_val('PO_Number','-')} | ประเภท: **{trans_type}**")
-            
-        with st.form(key="edit_po_form"):
-            st.markdown("#### 📦 1. ข้อมูลการรับของ")
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            qty_recv = r1_c1.number_input("ได้รับจริง (ชิ้น)", min_value=1, value=original_qty, key="e_qty_recv")
-            d_recv = r1_c2.date_input("วันที่รับ", value=date.today(), key="e_recv_date")
-            rem_qty = original_qty - qty_recv
-            note_def = get_val('Note', '')
-            if not note_def and rem_qty > 0: note_def = f"รับบางส่วน {qty_recv} (ค้าง {rem_qty})"
-            e_note = r1_c3.text_input("หมายเหตุ", value=note_def, key="e_note")
+            if img_url: c_img.image(img_url, width=80)
+            c_detail.markdown(f"### {pid_current}")
+            c_detail.write(f"**{pname}**")
 
-            e_cbm_final = 0.0
-            e_weight_final = 0.0
-            if not is_internal:
-                st.markdown("#### ⚓ 2. ข้อมูลนำเข้า (ขนาด/น้ำหนัก)")
-                old_cbm_total = float(get_val('CBM', 0))
-                old_weight_total = float(get_val('Transport_Weight', 0))
-                if original_qty > 0:
-                    suggest_cbm = (old_cbm_total / original_qty) * qty_recv
-                    suggest_weight = (old_weight_total / original_qty) * qty_recv
-                else: suggest_cbm, suggest_weight = old_cbm_total, old_weight_total
-                i_c1, i_c2 = st.columns(2)
-                e_cbm_final = i_c1.number_input("ขนาดคิว (CBM) *ของยอดที่รับ", min_value=0.0, value=float(suggest_cbm), step=0.001, format="%.4f", key="e_cbm_main")
-                e_weight_final = i_c2.number_input("น้ำหนัก (KG) *ของยอดที่รับ", min_value=0.0, value=float(suggest_weight), step=0.1, format="%.2f", key="e_weight_main")
+        with st.form(key="full_edit_po_form"):
+            st.info("✏️ แก้ไขข้อมูลในช่องต่างๆ ให้ถูกต้อง (ระบบจะคำนวณต้นทุนใหม่ให้)")
             
+            # --- GROUP 1: Header ข้อมูลเอกสาร ---
+            st.markdown("##### 1. ข้อมูลเอกสาร (Header)")
+            c1, c2, c3 = st.columns(3)
+            # 1. เลข PO
+            new_po = c1.text_input("เลข PO", value=get_val('PO_Number', ''), key="e_po")
+            
+            # 2. ขนส่ง
+            curr_trans = get_val('Transport_Type', 'ทางรถ')
+            trans_opts = ["ทางรถ", "ทางเรือ", "สินค้าภายใน"]
+            try: trans_idx = trans_opts.index(curr_trans)
+            except: trans_idx = 0
+            new_trans = c2.selectbox("ขนส่ง", trans_opts, index=trans_idx, key="e_trans")
+            is_internal = (new_trans == "สินค้าภายใน")
+            
+            # 3. วันที่สั่งซื้อ
+            try: d_ord_def = datetime.strptime(str(get_val('Order_Date', date.today())), "%Y-%m-%d").date()
+            except: d_ord_def = date.today()
+            new_ord_date = c3.date_input("วันที่สั่งซื้อ", value=d_ord_def, key="e_ord_date")
+
             st.divider()
-            with st.expander("💰 3. แก้ไขต้นทุน / ราคา (กดเพื่อเปิด)", expanded=False):
+
+            # --- GROUP 2: จำนวนและสถานะ ---
+            st.markdown("##### 2. จำนวนสินค้า (Quantity)")
+            c_q1, c_q2 = st.columns(2)
+            
+            # 4. จำนวน (Qty Ordered) - แก้ไขยอดตั้งต้นได้
+            old_qty = int(get_val('Qty_Ordered', 1))
+            new_qty_ordered = c_q1.number_input("จำนวนที่สั่ง (ยอดแก้)", min_value=1, value=old_qty, help="ยอดเต็มที่ถูกต้องตามจริง", key="e_qty_ord")
+            
+            # จำนวนที่รับ (Receive Logic)
+            new_qty_recv = c_q2.number_input("จำนวนที่รับ (รอบนี้)", min_value=1, value=new_qty_ordered, max_value=new_qty_ordered, help="ถ้ามาครบให้ใส่เท่ากัน, ถ้ามาไม่ครบระบบจะ Split ให้", key="e_qty_recv")
+            
+            # วันที่ได้รับ
+            try: d_recv_def = datetime.strptime(str(get_val('Received_Date', date.today())), "%Y-%m-%d").date()
+            except: d_recv_def = date.today()
+            new_recv_date = c_q2.date_input("วันที่ได้รับของ", value=d_recv_def, key="e_recv_date")
+
+            st.divider()
+
+            # --- GROUP 3: ต้นทุนและนำเข้า (Costs) ---
+            st.markdown("##### 3. ต้นทุนและนำเข้า")
+            
+            if is_internal:
+                # กรณีสินค้าภายใน
+                curr_thb_total = float(get_val('Total_THB', 0))
+                new_total_thb_full = st.number_input("ราคาสินค้าบาท (ยอดรวมทั้งหมด)", min_value=0.0, value=curr_thb_total, step=1.0, format="%.2f", key="e_thb_full")
+                new_total_yuan_full = 0.0
+                new_rate = 0.0
+                new_ship_rate = 0.0
+                new_cbm_full = 0.0
+                new_weight_full = 0.0
+            else:
+                # กรณีนำเข้า (หยวน/CBM/Weight)
+                k1, k2, k3 = st.columns(3)
+                curr_yuan_total = float(get_val('Total_Yuan', 0))
+                # 5. ราคาหยวน (ยอดรวม)
+                new_total_yuan_full = k1.number_input("ราคาหยวน (ยอดรวมทั้งหมด)", min_value=0.0, value=curr_yuan_total, step=1.0, format="%.2f", key="e_yuan_full")
+                
+                # 6. เรทเงิน
+                new_rate = k2.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, format="%.2f", key="e_rate")
+                
+                # 7. เรทค่าขนส่ง
+                new_ship_rate = k3.number_input("เรทค่าขนส่ง", min_value=0.0, value=float(get_val('Ship_Rate', 6000)), step=50.0, format="%.2f", key="e_ship_rate")
+                
+                k4, k5 = st.columns(2)
+                # 8. ขนาด (คิว) - ยอดรวม
+                new_cbm_full = k4.number_input("ขนาด CBM (ยอดรวมทั้งหมด)", min_value=0.0, value=float(get_val('CBM', 0)), step=0.001, format="%.4f", key="e_cbm")
+                
+                # 9. น้ำหนัก / KG - ยอดรวม
+                new_weight_full = k5.number_input("น้ำหนัก KG (ยอดรวมทั้งหมด)", min_value=0.0, value=float(get_val('Transport_Weight', 0)), step=0.1, format="%.2f", key="e_weight")
+
+            st.divider()
+
+            # --- GROUP 4: ราคาขายและอื่นๆ ---
+            st.markdown("##### 4. ราคาขาย & หมายเหตุ")
+            m1, m2, m3 = st.columns(3)
+            # 10, 11, 12 ราคาร้านค้า
+            new_shopee = m1.number_input("Shopee", value=float(get_val('Shopee_Price', 0)), key="e_shop")
+            new_lazada = m2.number_input("Lazada", value=float(get_val('Lazada_Price', 0)), key="e_laz")
+            new_tiktok = m3.number_input("TikTok", value=float(get_val('TikTok_Price', 0)), key="e_tik")
+            
+            # 13. หมายเหตุ
+            new_note = st.text_input("หมายเหตุ", value=get_val('Note', ''), key="e_note")
+            
+            # Link/WeChat (แถมให้ครบ)
+            l1, l2 = st.columns(2)
+            new_link = l1.text_input("Link", value=get_val('Link', ''), key="e_link")
+            new_wechat = l2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
+
+            # --- Calculate before Save ---
+            # คำนวณ Unit Values จากยอดรวมที่แก้ไขใหม่
+            calc_qty_base = new_qty_ordered if new_qty_ordered > 0 else 1
+            
+            if is_internal:
+                unit_yuan = 0
+                unit_thb_cost = new_total_thb_full / calc_qty_base
+                final_ship_cost_full = 0
+            else:
+                unit_yuan = new_total_yuan_full / calc_qty_base
+                final_ship_cost_full = new_cbm_full * new_ship_rate
+                total_thb_all = (new_total_yuan_full * new_rate) + final_ship_cost_full
+                unit_thb_cost = total_thb_all / calc_qty_base
+
+            # ปุ่มบันทึก
+            if st.form_submit_button("💾 บันทึกการแก้ไข (Update)", type="primary"):
+                # Logic: แบ่งข้อมูลตามสัดส่วน (Proportion) ของ Qty ที่รับ
+                recv_ratio = new_qty_recv / calc_qty_base
+                rem_qty = new_qty_ordered - new_qty_recv
+                
+                # ค่าสำหรับ Row ที่รับของ (Received Row)
+                recv_yuan = new_total_yuan_full * recv_ratio
+                recv_cbm = new_cbm_full * recv_ratio
+                recv_weight = new_weight_full * recv_ratio
+                recv_ship_cost = final_ship_cost_full * recv_ratio
+                
                 if is_internal:
-                    curr_total_thb = float(get_val('Total_THB', 0))
-                    if original_qty > 0 and qty_recv != original_qty:
-                         curr_total_thb = (curr_total_thb / original_qty) * qty_recv
-                    new_total_thb = st.number_input("ยอดเงินบาทรวม (฿)", min_value=0.0, value=curr_total_thb, step=1.0, format="%.2f", key="e_thb_int")
-                    e_yuan, e_rate, e_ship_rate = 0.0, 0.0, 0.0
+                    recv_total_thb = new_total_thb_full * recv_ratio
+                    # Internal: Total Yuan, Rate, ShipRate, ShipCost = 0
+                    data_recv = [
+                        pid_current, new_po, new_trans, new_ord_date.strftime("%Y-%m-%d"),
+                        new_recv_date.strftime("%Y-%m-%d"), (new_recv_date - new_ord_date).days, new_qty_recv, new_qty_recv,
+                        round(unit_thb_cost, 2), 0, round(recv_total_thb, 2),
+                        0, 0, 0, 0, 0, 0,
+                        new_shopee, new_lazada, new_tiktok, new_note, new_link, new_wechat, 
+                        get_val('Expected_Date', '')
+                    ]
                 else:
-                    f_c1, f_c2, f_c3 = st.columns(3)
-                    curr_total_yuan = float(get_val('Total_Yuan', 0))
-                    if original_qty > 0 and qty_recv != original_qty:
-                         curr_total_yuan = (curr_total_yuan / original_qty) * qty_recv
-                    e_yuan = f_c1.number_input("ราคารวม (หยวน) *เฉพาะยอดรับ", min_value=0.0, value=float(curr_total_yuan), step=0.01, format="%.2f", key="e_yuan_imp")
-                    e_rate = f_c2.number_input("เรทเงิน", min_value=0.0, value=float(get_val('Yuan_Rate', 5.0)), step=0.01, format="%.2f", key="e_rate_imp")
-                    e_ship_rate = f_c3.number_input("เรทขนส่ง", min_value=0.0, value=float(get_val('Ship_Rate', 6000)), step=100.0, format="%.2f", key="e_ship_rate_imp")
-                    new_total_thb = 0.0
+                    recv_total_thb = (recv_yuan * new_rate) + recv_ship_cost
+                    data_recv = [
+                        pid_current, new_po, new_trans, new_ord_date.strftime("%Y-%m-%d"),
+                        new_recv_date.strftime("%Y-%m-%d"), (new_recv_date - new_ord_date).days, new_qty_recv, new_qty_recv,
+                        round(unit_thb_cost, 2), round(recv_yuan, 2), round(recv_total_thb, 2),
+                        new_rate, new_ship_rate, round(recv_cbm, 4), round(recv_ship_cost, 2), round(recv_weight, 2), round(unit_yuan, 4),
+                        new_shopee, new_lazada, new_tiktok, new_note, new_link, new_wechat,
+                        get_val('Expected_Date', '')
+                    ]
 
-                st.markdown("**ข้อมูลเพิ่มเติม (Link)**")
-                l_c1, l_c2 = st.columns(2)
-                e_link = l_c1.text_input("Link", value=get_val('Link', ''), key="e_link")
-                e_wechat = l_c2.text_input("WeChat", value=get_val('WeChat', ''), key="e_wechat")
-
-            if st.form_submit_button("💾 บันทึกรับของ / แก้ไข", type="primary"):
-                if is_internal:
-                    final_total_yuan = final_rate = final_ship_rate = final_cbm = final_weight = total_ship_cost = 0
-                    final_total_thb = new_total_thb
-                    unit_cost_thb = final_total_thb / qty_recv if qty_recv > 0 else 0
+                # ค่าสำหรับ Row ที่เหลือ (Remaining Row) - ถ้ามี Split
+                if rem_qty > 0:
+                    rem_ratio = rem_qty / calc_qty_base
+                    rem_yuan = new_total_yuan_full * rem_ratio
+                    rem_cbm = new_cbm_full * rem_ratio
+                    rem_total_thb = 0
+                    if is_internal: rem_total_thb = new_total_thb_full * rem_ratio
+                    
+                    data_rem = [
+                        pid_current, new_po, new_trans, new_ord_date.strftime("%Y-%m-%d"),
+                        None, 0, rem_qty, 0, 
+                        0, round(rem_yuan, 2), round(rem_total_thb, 2),
+                        new_rate, new_ship_rate, round(rem_cbm, 4), 0, 0, 0,
+                        new_shopee, new_lazada, new_tiktok, f"รอรับส่วนที่เหลือ ({rem_qty})", new_link, new_wechat,
+                        get_val('Expected_Date', '')
+                    ]
+                    success = save_po_edit_split(row_index, data_rem, data_recv)
                 else:
-                    final_total_yuan, final_rate, final_ship_rate = e_yuan, e_rate, e_ship_rate
-                    final_cbm, final_weight = e_cbm_final, e_weight_final
-                    total_ship_cost = final_cbm * final_ship_rate
-                    final_total_thb = (final_total_yuan * final_rate) + total_ship_cost
-                    unit_cost_thb = final_total_thb / qty_recv if qty_recv > 0 else 0
+                    # อัพเดทแถวเดิม (Overwrite)
+                    success = save_po_edit_update(row_index, data_recv)
 
-                recv_date_str = d_recv.strftime("%Y-%m-%d")
-                wait_days = (d_recv - d_ord).days
-                
-                orig_yuan = float(get_val('Total_Yuan', 0))
-                orig_cbm = float(get_val('CBM', 0))
-                orig_thb = float(get_val('Total_THB', 0))
-                rem_yuan = orig_yuan - final_total_yuan if (orig_yuan > final_total_yuan) else 0
-                rem_cbm = orig_cbm - final_cbm if (orig_cbm > final_cbm) else 0
-                rem_thb = 0
-                if is_internal:
-                    rem_thb = orig_thb - final_total_thb
-                    if rem_thb < 0: rem_thb = 0
-                
-                data_rem = [
-                    get_val('Product_ID', ''), get_val('PO_Number', ''), trans_type, d_ord.strftime("%Y-%m-%d"), 
-                    None, 0, rem_qty, 0, 0, round(rem_yuan, 2), round(rem_thb, 2) if is_internal else 0,
-                    e_rate if not is_internal else 0, e_ship_rate if not is_internal else 0, round(rem_cbm, 4), 0, 0, 0,
-                    get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
-                    f"รอรับส่วนที่เหลือ ({rem_qty})", e_link, e_wechat, get_val('Expected_Date', '')
-                ]
-                data_recv = [
-                    get_val('Product_ID', ''), get_val('PO_Number', ''), trans_type, d_ord.strftime("%Y-%m-%d"), 
-                    recv_date_str, wait_days, qty_recv, qty_recv, round(unit_cost_thb, 2),
-                    round(final_total_yuan, 2), round(final_total_thb, 2),
-                    final_rate, final_ship_rate, round(final_cbm, 4), round(total_ship_cost, 2), final_weight,
-                    round(final_total_yuan/qty_recv, 4) if (qty_recv > 0 and not is_internal) else 0,
-                    get_val('Shopee_Price',0), get_val('Lazada_Price',0), get_val('TikTok_Price',0), 
-                    e_note, e_link, e_wechat, get_val('Expected_Date', '')
-                ]
-
-                if rem_qty > 0: success = save_po_edit_split(row_index, data_rem, data_recv)
-                else: success = save_po_edit_update(row_index, data_recv)
-                
                 if success:
-                    st.success("✅ บันทึกข้อมูลเรียบร้อย")
+                    st.success("✅ บันทึกข้อมูลเรียบร้อย!")
                     st.session_state.active_dialog = None
-                    # Clear target data
                     st.session_state.target_edit_data = {}
                     time.sleep(1)
                     st.rerun()
