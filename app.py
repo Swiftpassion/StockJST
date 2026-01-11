@@ -1166,9 +1166,11 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 else: final_report = df_master.copy()
                 
                 day_cols = [c for c in final_report.columns if c not in df_master.columns]
-                # [FIX] Clean day_cols to remove any potential garbage that might cause header artifacts
-                day_cols = [c for c in day_cols if isinstance(c, str) and "🔴" not in c]
                 
+                # [FIX] Clean up columns to remove artifacts
+                day_cols = [c for c in day_cols if isinstance(c, str) and "🔴" not in c and "หมด" not in c]
+                # [FIX END]
+
                 final_report[day_cols] = final_report[day_cols].fillna(0).astype(int)
                 
                 if selected_category != "แสดงทั้งหมด": final_report = final_report[final_report['Product_Type'] == selected_category]
@@ -1219,7 +1221,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     </style>
                     """, unsafe_allow_html=True)
                     
-                    # --- [FIX] Create HTML Table with Clean Header ---
+                    # --- [FIX] Create HTML Table with Token Links ---
                     curr_token = st.query_params.get("token", "")
                     
                     html_table = """
