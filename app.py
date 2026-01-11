@@ -1893,10 +1893,6 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         if sel_cat_po != "แสดงทั้งหมด":
             df_display = df_display[df_display['Product_Type'] == sel_cat_po]
 
-        # 4. คำนวณสถานะและแสดงผลตาราง (Logic เดิม)
-        def get_status(row):
-             # ... (Copy ฟังก์ชัน get_status เดิมมาใส่ หรือใช้ logic เดิมด้านล่างต่อได้เลย) ...
-
         def get_status(row):
             qty_ord = float(row.get('Qty_Ordered', 0))
             qty_recv = float(row.get('Qty_Received', 0))
