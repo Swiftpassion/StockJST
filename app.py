@@ -1038,7 +1038,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
 @st.dialog("⚠️ ยืนยันการลบ", width="small")
 def delete_confirm_dialog():
     st.warning(f"คุณต้องการลบรายการ PO: {st.session_state.get('target_delete_po')} ใช่หรือไม่?")
-    st.caption("การลบนี้จะหายไปจาก Google Sheet ทันทีและกู้คืนไม่ได้")
+    st.caption("การลบนี้จะหายไปจากฐานข้อมูลทันทีและกู้คืนไม่ได้")
     
     col1, col2 = st.columns(2)
     if col1.button("ยืนยันลบ", type="primary", use_container_width=True):
