@@ -1335,6 +1335,24 @@ def po_multi_item_dialog():
 # 6. NAVIGATION & LOGIC
 # ==========================================
 
+# --- FIX: ย้ายการเช็ค Edit Params มาไว้ตรงนี้ (ก่อนสร้าง Menu Navigation) ---
+# เพื่อให้เมื่อ Reload หน้าแล้ว ระบบจะดักจับได้ทันทีและบังคับเข้าหน้า PO
+if "edit_po" in st.query_params and "edit_pid" in st.query_params:
+    p_po = st.query_params["edit_po"]
+    p_pid = st.query_params["edit_pid"]
+    
+    # ลบ params ออกเพื่อไม่ให้วนลูป
+    if "edit_po" in st.query_params: del st.query_params["edit_po"]
+    if "edit_pid" in st.query_params: del st.query_params["edit_pid"]
+    
+    # บันทึกข้อมูลเป้าหมาย และบังคับเปลี่ยนหน้า
+    st.session_state.target_edit_data = {"po": p_po, "pid": p_pid}
+    st.session_state.active_dialog = "po_edit_direct"
+    st.session_state.current_page = "📝 รายการสั่งซื้อ" # <--- บรรทัดสำคัญ: บังคับให้เป็นหน้านี้
+    st.rerun()
+
+# -------------------------------------------
+
 selected_page = st.radio(
     "", 
     options=["📅 สรุปยอดขายรายวัน", "📝 รายการสั่งซื้อ", "📈 รายงาน Stock"],
@@ -1512,16 +1530,8 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
 # --- Page 2: Purchase Orders ---
 elif st.session_state.current_page == "📝 รายการสั่งซื้อ":
     
-    # Check Direct Edit Params
-    if "edit_po" in st.query_params and "edit_pid" in st.query_params:
-        p_po = st.query_params["edit_po"]
-        p_pid = st.query_params["edit_pid"]
-        del st.query_params["edit_po"]
-        del st.query_params["edit_pid"]
-        st.session_state.target_edit_data = {"po": p_po, "pid": p_pid}
-        st.session_state.active_dialog = "po_edit_direct"
-        st.rerun()
-
+    # [REMOVED] ตรงนี้คือโค้ดเดิมที่ผิดที่ (เอา edit_po check ออกจากตรงนี้แล้ว)
+    
     if "view_info" in st.query_params:
         val_to_show = st.query_params["view_info"]
         show_info_dialog(val_to_show)
@@ -1536,11 +1546,9 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             st.session_state.active_dialog = "po_batch"
             st.rerun()
             
-        # --- ปุ่มใหม่ที่คุณต้องการ ---
         if b2.button("➕ PO หลายรายการ", type="primary", use_container_width=True):
             st.session_state.active_dialog = "po_multi_item"
             st.rerun()
-        # ------------------------
 
         if b3.button("➕ PO ภายใน", type="secondary", use_container_width=True): 
             st.session_state.active_dialog = "po_internal"
