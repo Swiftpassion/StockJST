@@ -535,7 +535,7 @@ def show_history_dialog(fixed_product_id=None):
                 def get_status_hist(row):
                     qty_ord = float(row.get('Qty_Ordered', 0))
                     qty_recv = float(row.get('Qty_Received', 0))
-                    if qty_recv >= qty_ord and qty_ord > 0: return "ได้รับสินค้าเรียบร้อย", "#d4edda", "#155724"
+                    if qty_recv >= qty_ord and qty_ord > 0: return "เรียบร้อย", "#d4edda", "#155724"
                     if qty_recv > 0 and qty_recv < qty_ord: return "สินค้าไม่ครบ", "#fff3cd", "#856404"
                     exp_date = row.get('Expected_Date')
                     if pd.notna(exp_date):
@@ -660,7 +660,7 @@ def show_history_dialog(fixed_product_id=None):
             else: st.warning("❌ ไม่พบประวัติการสั่งซื้อสำหรับสินค้านี้")
         else: st.warning("❌ ยังไม่มีข้อมูล PO ในระบบ")
 
-@st.dialog("📝 บันทึกรับของ / แก้ไข PO (Full Edit)", width="large")
+@st.dialog("📝 บันทึกรับของ / แก้ไข PO", width="large")
 def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
     selected_row, row_index = None, None
     po_map = {}
@@ -761,7 +761,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
             # =========================================================
             # SECTION 2: แก้ไข Master Data (แก้ไขสิ่งที่ผิด)
             # =========================================================
-            with st.expander("📝 แก้ไขรายละเอียด PO / ต้นทุนรวม (Master Data)", expanded=True):
+            with st.expander("📝 แก้ไขรายละเอียด PO", expanded=True):
                 
                 # --- Row 1: Header ---
                 h1, h2, h3 = st.columns(3)
@@ -780,7 +780,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                 # --- Row 2: Total Qty & Price ---
                 st.markdown("**ข้อมูลยอดรวม (Total)**")
                 q1, q2, q3 = st.columns(3)
-                new_qty_ordered = q1.number_input("จำนวนสั่งซื้อรวม (Master)", min_value=1, value=old_qty, help="ยอดเต็มของ PO นี้", key="e_qty_ord")
+                new_qty_ordered = q1.number_input("จำนวนสั่งทั้งหมดใน PO", min_value=1, value=old_qty, help="ยอดเต็มของ PO นี้", key="e_qty_ord")
                 
                 new_total_yuan_full = 0.0
                 new_rate = 0.0
@@ -890,7 +890,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     success = save_po_edit_update(row_index, data_recv)
 
                 if success:
-                    st.success("✅ บันทึกข้อมูลและคำนวณต้นทุนใหม่เรียบร้อย!")
+                    st.success("✅ บันทึกข้อมูลเรียบร้อย!")
                     st.session_state.active_dialog = None
                     st.session_state.target_edit_data = {}
                     time.sleep(1)
@@ -1372,7 +1372,7 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             with c_search:
                 search_po_query = st.text_input("🔍 ค้นหา (เลข PO / รหัสสินค้า)", placeholder="พิมพ์เลข PO หรือ รหัสสินค้า...")
             with c_status:
-                sel_status = st.selectbox("สถานะ:", ["ทั้งหมด", "สินค้าใกล้ถึง", "รอจัดส่ง", "สินค้าไม่ครบ", "ได้รับสินค้าเรียบร้อย"])
+                sel_status = st.selectbox("สถานะ:", ["ทั้งหมด", "สินค้าใกล้ถึง", "รอจัดส่ง", "สินค้าไม่ครบ", "เรียบร้อย"])
             with c_cat:
                 all_types = ["แสดงทั้งหมด"]
                 if not df_master.empty and 'Product_Type' in df_master.columns:
@@ -1410,7 +1410,7 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             qty_ord = float(row.get('Qty_Ordered', 0))
             qty_recv = float(row.get('Qty_Received', 0))
             if qty_recv >= qty_ord and qty_ord > 0:
-                return "ได้รับสินค้าเรียบร้อย", "#d4edda", "#155724" 
+                return "เรียบร้อย", "#d4edda", "#155724" 
             if qty_recv > 0 and qty_recv < qty_ord:
                 return "สินค้าไม่ครบ", "#fff3cd", "#856404" 
             exp_date = row.get('Expected_Date')
