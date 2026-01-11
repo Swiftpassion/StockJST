@@ -1034,7 +1034,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     st.rerun()
                 else:
                     st.error("❌ เกิดข้อผิดพลาดในการบันทึก")
-                    
+
 @st.dialog("⚠️ ยืนยันการลบ", width="small")
 def delete_confirm_dialog():
     st.warning(f"คุณต้องการลบรายการ PO: {st.session_state.get('target_delete_po')} ใช่หรือไม่?")
@@ -1053,9 +1053,21 @@ def delete_confirm_dialog():
     if col2.button("ยกเลิก", use_container_width=True):
         st.session_state.active_dialog = None
         st.rerun()
-
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
+    # --- Function: คำนวณวันที่คาดการณ์อัตโนมัติ ---
+    def auto_update_batch_date():
+        t = st.session_state.get("bp_trans", "ทางรถ")
+        d = st.session_state.get("bp_ord_date", date.today())
+        
+        days_add = 0
+        if t == "ทางรถ": days_add = 14
+        elif t == "ทางเรือ": days_add = 25
+        
+        if d:
+            st.session_state.bp_expected_date = d + timedelta(days=days_add)
+
+    # --- Reset Logic ---
     if st.session_state.get("need_reset_inputs", False):
         keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", 
                          "bp_note", "bp_shop_s", "bp_shop_l", "bp_shop_t", "bp_expected_date", 
@@ -1063,14 +1075,37 @@ def po_batch_dialog():
         for key in keys_to_reset:
             if key in st.session_state: del st.session_state[key]
         st.session_state["need_reset_inputs"] = False
+        
+        # หลัง Reset ให้คำนวณวันที่ใหม่ตาม Header ปัจจุบัน
+        auto_update_batch_date()
 
+    # --- 1. Header Section ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
         po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
-        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], key="bp_trans")
-        order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
+        
+        # เพิ่ม on_change
+        transport_type = c2.selectbox(
+            "การขนส่ง", 
+            ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], 
+            key="bp_trans",
+            on_change=auto_update_batch_date
+        )
+        
+        # เพิ่ม on_change
+        order_date = c3.date_input(
+            "วันที่สั่งซื้อ", 
+            date.today(), 
+            key="bp_ord_date",
+            on_change=auto_update_batch_date
+        )
+        
+        # Set Default ถ้ายังไม่มีค่าใน Session State
+        if "bp_expected_date" not in st.session_state:
+            auto_update_batch_date()
 
+    # --- 2. Item Form Section ---
     with st.container(border=True):
         st.subheader("2. รายละเอียดสินค้า")
         prod_list = []
@@ -1095,7 +1130,10 @@ def po_batch_dialog():
             with col_data:
                 st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
                 r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", value=None, key="bp_expected_date")
+                
+                # ช่องวันที่คาดการณ์ (ค่าจะเปลี่ยนตาม Session State)
+                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", key="bp_expected_date")
+                
                 qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="bp_qty")
                 rate_money = r1_c3.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="bp_rate")
                 ship_rate = r1_c4.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, format="%.2f", placeholder="XXXXX", key="bp_ship_rate")
@@ -1197,6 +1235,13 @@ def po_batch_dialog():
 
 @st.dialog("📝 บันทึก PO สินค้าภายใน (Internal)", width="large")
 def po_internal_batch_dialog():
+    # --- Function: คำนวณวันที่คาดการณ์อัตโนมัติ (Internal +3 วัน) ---
+    def auto_update_internal_date():
+        d = st.session_state.get("int_ord_date", date.today())
+        if d:
+            st.session_state.int_expected_date = d + timedelta(days=3) # Default 3 วันสำหรับในประเทศ
+
+    # --- Reset Logic ---
     if st.session_state.get("need_reset_inputs_int", False):
         keys_to_reset = ["int_sel_prod", "int_qty", "int_total_thb", "int_note", 
                          "int_link", "int_contact", "int_shop_s", "int_shop_l", "int_shop_t", 
@@ -1204,13 +1249,29 @@ def po_internal_batch_dialog():
         for key in keys_to_reset:
             if key in st.session_state: del st.session_state[key]
         st.session_state["need_reset_inputs_int"] = False
+        
+        # หลัง Reset ให้คำนวณวันที่ใหม่
+        auto_update_internal_date()
 
+    # --- 1. Header Section ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2 = st.columns(2)
         po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="int_po_num")
-        order_date = c2.date_input("วันที่สั่งซื้อ", date.today(), key="int_ord_date")
+        
+        # เพิ่ม on_change
+        order_date = c2.date_input(
+            "วันที่สั่งซื้อ", 
+            date.today(), 
+            key="int_ord_date",
+            on_change=auto_update_internal_date
+        )
+        
+        # Set Default ครั้งแรก
+        if "int_expected_date" not in st.session_state:
+            auto_update_internal_date()
 
+    # --- 2. Item Form Section ---
     with st.container(border=True):
         st.subheader("2. รายละเอียดสินค้า")
         prod_list = []
@@ -1235,7 +1296,10 @@ def po_internal_batch_dialog():
             with col_data:
                 st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
                 r1_c1, r1_c2, r1_c3 = st.columns(3)
-                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", value=None, key="int_expected_date")
+                
+                # ช่องวันที่คาดการณ์ (อัปเดตตาม Session State)
+                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", key="int_expected_date")
+                
                 qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="int_qty")
                 recv_date = r1_c3.date_input("วันที่ได้รับ (ถ้าได้เลย)", value=None, key="int_recv_date")
                 r2_c1, r2_c2 = st.columns(2)
@@ -1313,18 +1377,52 @@ def po_internal_batch_dialog():
                 st.session_state.active_dialog = None 
                 time.sleep(1)
                 st.rerun()
-@st.dialog("📝 บันทึก PO หลายรายการ (Multi-Item)", width="large")
+                
+@st.dialog("📝 บันทึก PO หลายรายการ", width="large")
 def po_multi_item_dialog():
+    # --- Function: Auto-Calculate Expected Date ---
+    def auto_update_exp_date():
+        # ดึงค่าปัจจุบันจาก State
+        t_type = st.session_state.mi_trans
+        o_date = st.session_state.mi_ord_date
+        
+        days_add = 0
+        if t_type == "ทางรถ": days_add = 14
+        elif t_type == "ทางเรือ": days_add = 25
+        
+        # ถ้าเข้าเงื่อนไข ให้คำนวณและอัปเดตวันที่คาดการณ์
+        if days_add > 0 and o_date:
+            st.session_state.mi_exp_date = o_date + timedelta(days=days_add)
+
     # --- 1. Header Section ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         h1, h2, h3, h4 = st.columns(4)
         po_number = h1.text_input("เลข PO", placeholder="XXXXX", key="mi_po")
-        transport = h2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], key="mi_trans")
-        ord_date = h3.date_input("วันที่สั่งซื้อ", date.today(), key="mi_ord_date")
-        exp_date = h4.date_input("วันที่คาดว่าจะได้รับ", value=None, key="mi_exp_date")
+        
+        # เพิ่ม on_change เพื่อเรียกฟังก์ชันคำนวณวันที่อัตโนมัติ
+        transport = h2.selectbox(
+            "การขนส่ง", 
+            ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], 
+            key="mi_trans",
+            on_change=auto_update_exp_date 
+        )
+        
+        # เพิ่ม on_change กรณีเปลี่ยนวันที่สั่งซื้อ ก็ให้คำนวณใหม่ด้วย
+        ord_date = h3.date_input(
+            "วันที่สั่งซื้อ", 
+            date.today(), 
+            key="mi_ord_date",
+            on_change=auto_update_exp_date
+        )
+        
+        # Logic เริ่มต้น: ถ้าเปิดมาครั้งแรกยังไม่มีค่า ให้คำนวณ Default (ทางรถ +14) ไว้รอเลย
+        if "mi_exp_date" not in st.session_state:
+            st.session_state.mi_exp_date = date.today() + timedelta(days=14)
 
-    # --- 2. Items Table Section (Moved Up) ---
+        exp_date = h4.date_input("วันที่คาดว่าจะได้รับ", key="mi_exp_date")
+
+    # --- 2. Items Table Section ---
     with st.container(border=True):
         st.subheader("2. รายการสินค้า")
         
@@ -1351,14 +1449,14 @@ def po_multi_item_dialog():
         # Calculate Total Qty immediately for use in Section 3
         total_qty_calculated = edited_df["จำนวน"].sum()
 
-    # --- 3. Grand Totals & Receiving Section (Restructured) ---
+    # --- 3. Grand Totals & Receiving Section ---
     with st.container(border=True):
         st.subheader("3. ยอดรวมทั้งหมด (Grand Totals)")
         
         # --- 3.1 Ordering Info ---
         st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
         t1, t2, t3, t4 = st.columns(4)
-        # แก้ไข: กำหนด value=None เพื่อให้ช่องว่าง และเพิ่ม placeholder
+        
         rate_money = t1.number_input("เรทเงิน", min_value=0.0, step=0.01, value=None, placeholder="5.00", format="%.2f", key="mi_rate")
         ship_rate = t2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, placeholder="6000.00", format="%.2f", key="mi_ship_rate")
         
@@ -1375,7 +1473,6 @@ def po_multi_item_dialog():
         grand_total_weight = r3.number_input("น้ำหนักทั้งหมด (Total KG)", min_value=0.0, step=0.1, format="%.2f", key="mi_tot_weight")
 
         # --- Real-time Calculation Logic ---
-        # 1. Calculate Unit Metrics (Average)
         unit_yuan = grand_total_yuan / total_qty_calculated if total_qty_calculated > 0 else 0
         unit_cbm = grand_total_cbm / total_qty_calculated if total_qty_calculated > 0 and grand_total_cbm > 0 else 0
         unit_weight = grand_total_weight / total_qty_calculated if total_qty_calculated > 0 and grand_total_weight > 0 else 0
@@ -1434,31 +1531,25 @@ def po_multi_item_dialog():
         elif total_qty_calculated <= 0:
             st.error("❌ กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ")
         else:
-            # เพิ่ม Logic ป้องกันค่า None (สำคัญมาก)
             c_rate_money = rate_money if rate_money is not None else 0.0
             c_ship_rate = ship_rate if ship_rate is not None else 0.0
 
-            # Prepare Data for Saving
             rows_to_save = []
             
             for item in preview_data:
-                # Calculations for DB (per row)
                 c_sku = item["SKU"]
                 c_qty = item["จำนวน"]
                 c_yuan_total = item["รวมหยวน (¥)"]
                 c_cbm_total = item["รวมคิว (CBM)"]
                 c_weight_total = item["รวมน้ำหนัก (KG)"]
                 
-                # Cost Calculation (ใช้ตัวแปรที่ดัก None แล้ว)
                 c_ship_cost_total = c_cbm_total * c_ship_rate
                 c_thb_product_total = c_yuan_total * c_rate_money
-                c_thb_final_total = c_thb_product_total + c_ship_cost_total # ต้นทุนรวม (ของ + ขนส่ง)
+                c_thb_final_total = c_thb_product_total + c_ship_cost_total
                 
-                # Unit Costs
                 c_unit_thb = c_thb_final_total / c_qty if c_qty > 0 else 0
                 c_unit_yuan = c_yuan_total / c_qty if c_qty > 0 else 0
 
-                # Determine Receiving Status
                 final_recv_date_str = ""
                 final_wait_days = 0
                 final_qty_recv = 0
@@ -1469,38 +1560,20 @@ def po_multi_item_dialog():
                     if ord_date:
                         final_wait_days = (recv_date - ord_date).days
 
-                # Map to Sheet Columns (ใช้ตัวแปรที่ดัก None แล้ว)
                 row_data = [
-                    c_sku,              # Product_ID
-                    po_number,          # PO_Number
-                    transport,          # Transport_Type
-                    ord_date.strftime("%Y-%m-%d"), # Order_Date
-                    final_recv_date_str,# Received_Date
-                    final_wait_days,    # Wait Days
-                    c_qty,              # Qty_Ordered
-                    final_qty_recv,     # Qty_Received
-                    round(c_unit_thb, 2),   # Price_Unit_NoVAT
-                    round(c_yuan_total, 2), # Total_Yuan
-                    round(c_thb_final_total, 2), # Total_THB
-                    c_rate_money,       # Yuan_Rate (ใช้ค่าที่ปลอดภัย)
-                    c_ship_rate,        # Ship_Rate (ใช้ค่าที่ปลอดภัย)
-                    round(c_cbm_total, 4),  # CBM
-                    round(c_ship_cost_total, 2), # Ship_Cost
-                    round(c_weight_total, 2), # Transport_Weight
-                    round(c_unit_yuan, 4),  # Unit Yuan Price
-                    p_s, p_l, p_t,      # Shopee, Laz, TikTok
-                    note,               # Note
-                    link_shop,          # Link
-                    wechat,             # WeChat
-                    exp_date.strftime("%Y-%m-%d") if exp_date else "" # Expected_Date
+                    c_sku, po_number, transport, ord_date.strftime("%Y-%m-%d"),
+                    final_recv_date_str, final_wait_days, c_qty, final_qty_recv,
+                    round(c_unit_thb, 2), round(c_yuan_total, 2), round(c_thb_final_total, 2),
+                    c_rate_money, c_ship_rate, round(c_cbm_total, 4), round(c_ship_cost_total, 2), round(c_weight_total, 2), round(c_unit_yuan, 4),
+                    p_s, p_l, p_t, note, link_shop, wechat,
+                    exp_date.strftime("%Y-%m-%d") if exp_date else ""
                 ]
                 rows_to_save.append(row_data)
 
-            # Call Save Function
             if save_po_batch_to_sheet(rows_to_save):
                 st.success(f"✅ บันทึก {len(rows_to_save)} รายการเรียบร้อยแล้ว!")
-                # Clear Session State
                 if "mi_items_df" in st.session_state: del st.session_state.mi_items_df
+                if "mi_exp_date" in st.session_state: del st.session_state.mi_exp_date # Clear date state
                 time.sleep(1.5)
                 st.session_state.active_dialog = None
                 st.rerun()
