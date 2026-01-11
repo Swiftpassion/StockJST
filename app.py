@@ -1155,6 +1155,181 @@ def po_internal_batch_dialog():
                 st.session_state.active_dialog = None 
                 time.sleep(1)
                 st.rerun()
+@st.dialog("📝 บันทึก PO หลายรายการ (Multi-Item)", width="large")
+def po_multi_item_dialog():
+    # --- 1. Header Section ---
+    with st.container(border=True):
+        st.subheader("1. ข้อมูลเอกสาร (Header)")
+        h1, h2, h3, h4 = st.columns(4)
+        po_number = h1.text_input("เลข PO", placeholder="XXXXX", key="mi_po")
+        transport = h2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], key="mi_trans")
+        ord_date = h3.date_input("วันที่สั่งซื้อ", date.today(), key="mi_ord_date")
+        exp_date = h4.date_input("วันที่คาดว่าจะได้รับ", value=None, key="mi_exp_date")
+
+    # --- 2. Totals Section ---
+    with st.container(border=True):
+        st.subheader("2. ยอดรวมทั้งหมด (Grand Totals)")
+        st.info("💡 กรอกยอดรวมทั้งหมดของบิลนี้ ระบบจะเฉลี่ยเข้าสินค้าแต่ละตัวตามจำนวนชิ้น")
+        
+        t1, t2, t3 = st.columns(3)
+        rate_money = t1.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="mi_rate")
+        ship_rate = t2.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=6000.0, format="%.2f", key="mi_ship_rate")
+        
+        st.markdown("---")
+        c1, c2, c3 = st.columns(3)
+        grand_total_yuan = c1.number_input("ราคาหยวนทั้งหมด (¥)", min_value=0.0, step=1.0, format="%.2f", key="mi_tot_yuan")
+        grand_total_cbm = c2.number_input("คิวทั้งหมด (CBM)", min_value=0.0, step=0.001, format="%.4f", key="mi_tot_cbm")
+        grand_total_weight = c3.number_input("น้ำหนักทั้งหมด (KG)", min_value=0.0, step=0.1, format="%.2f", key="mi_tot_weight")
+
+    # --- 3. Items Table Section ---
+    with st.container(border=True):
+        st.subheader("3. รายการสินค้า")
+        
+        # Prepare Master Data for Dropdown
+        product_options = []
+        if not df_master.empty:
+            product_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
+
+        # Data Editor Setup
+        if "mi_items_df" not in st.session_state:
+            st.session_state.mi_items_df = pd.DataFrame([{"สินค้า": None, "จำนวน": 0}])
+
+        edited_df = st.data_editor(
+            st.session_state.mi_items_df,
+            column_config={
+                "สินค้า": st.column_config.SelectboxColumn("เลือกสินค้า (SKU)", options=product_options, width="large", required=True),
+                "จำนวน": st.column_config.NumberColumn("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, step=1, required=True, width="small"),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            key="mi_editor"
+        )
+
+        # --- Real-time Calculation Logic ---
+        # 1. Calculate Total Qty from Table
+        total_qty_calculated = edited_df["จำนวน"].sum()
+        
+        # 2. Calculate Unit Metrics (Average)
+        unit_yuan = grand_total_yuan / total_qty_calculated if total_qty_calculated > 0 else 0
+        unit_cbm = grand_total_cbm / total_qty_calculated if total_qty_calculated > 0 else 0
+        unit_weight = grand_total_weight / total_qty_calculated if total_qty_calculated > 0 else 0
+
+        # 3. Create Preview Table
+        preview_data = []
+        if total_qty_calculated > 0 and not edited_df.empty:
+            for idx, row in edited_df.iterrows():
+                if row["สินค้า"] and row["จำนวน"] > 0:
+                    sku = row["สินค้า"].split(" : ")[0]
+                    qty = row["จำนวน"]
+                    
+                    # Calculate Row Values
+                    row_yuan = qty * unit_yuan
+                    row_cbm = qty * unit_cbm
+                    row_weight = qty * unit_weight
+                    
+                    preview_data.append({
+                        "No.": idx + 1,
+                        "SKU": sku,
+                        "จำนวน": qty,
+                        "รวมหยวน (¥)": round(row_yuan, 2),
+                        "รวมคิว (CBM)": round(row_cbm, 4),
+                        "รวมน้ำหนัก (KG)": round(row_weight, 2)
+                    })
+        
+        st.markdown(f"""
+        <div style="background-color:#1e3c72; padding:10px; border-radius:5px; color:white; margin-top:10px;">
+            <b>📊 สรุปการคำนวณเฉลี่ย:</b> จำนวนสินค้าทั้งหมด <b>{total_qty_calculated:,}</b> ชิ้น<br>
+            • เฉลี่ย 1 ชิ้น = <b>{unit_yuan:,.2f}</b> หยวน<br>
+            • เฉลี่ย 1 ชิ้น = <b>{unit_cbm:,.4f}</b> CBM<br>
+            • เฉลี่ย 1 ชิ้น = <b>{unit_weight:,.2f}</b> KG
+        </div>
+        """, unsafe_allow_html=True)
+
+        if preview_data:
+            st.write("ตารางตรวจสอบความถูกต้อง (Calculated Preview):")
+            st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+
+    # --- 4. Footer & Save ---
+    with st.container(border=True):
+        st.subheader("4. ข้อมูลเพิ่มเติม (ใช้ร่วมกันทุกรายการ)")
+        f1, f2 = st.columns(2)
+        link_shop = f1.text_input("Link Shop", key="mi_link")
+        wechat = f2.text_input("WeChat / Contact", key="mi_wechat")
+        
+        p1, p2, p3 = st.columns(3)
+        p_s = p1.number_input("Shopee Price", min_value=0.0, key="mi_p_s")
+        p_l = p2.number_input("Lazada Price", min_value=0.0, key="mi_p_l")
+        p_t = p3.number_input("TikTok Price", min_value=0.0, key="mi_p_t")
+        
+        note = st.text_input("หมายเหตุ (Note)", key="mi_note")
+
+    st.divider()
+    
+    # Save Button Logic
+    if st.button("💾 บันทึก PO รายการทั้งหมด", type="primary", use_container_width=True):
+        if not po_number:
+            st.error("❌ กรุณากรอกเลข PO")
+        elif total_qty_calculated <= 0:
+            st.error("❌ กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ")
+        else:
+            # Prepare Data for Saving
+            rows_to_save = []
+            
+            for item in preview_data:
+                # Calculations for DB (per row)
+                # item["รวมหยวน (¥)"] คือค่าที่เราคำนวณแยกแล้ว
+                
+                c_sku = item["SKU"]
+                c_qty = item["จำนวน"]
+                c_yuan_total = item["รวมหยวน (¥)"]
+                c_cbm_total = item["รวมคิว (CBM)"]
+                c_weight_total = item["รวมน้ำหนัก (KG)"]
+                
+                # Cost Calculation
+                c_ship_cost_total = c_cbm_total * ship_rate
+                c_thb_product_total = c_yuan_total * rate_money
+                c_thb_final_total = c_thb_product_total + c_ship_cost_total # ต้นทุนรวม (ของ + ขนส่ง)
+                
+                # Unit Costs
+                c_unit_thb = c_thb_final_total / c_qty if c_qty > 0 else 0
+                c_unit_yuan = c_yuan_total / c_qty if c_qty > 0 else 0
+
+                # Map to Sheet Columns (ตรงตามลำดับใน Google Sheet)
+                row_data = [
+                    c_sku,              # Product_ID
+                    po_number,          # PO_Number
+                    transport,          # Transport_Type
+                    ord_date.strftime("%Y-%m-%d"), # Order_Date
+                    "",                 # Received_Date (ยังไม่รับ)
+                    0,                  # Wait Days
+                    c_qty,              # Qty_Ordered
+                    0,                  # Qty_Received
+                    round(c_unit_thb, 2),   # Price_Unit_NoVAT (ต้นทุนบาท/ชิ้น)
+                    round(c_yuan_total, 2), # Total_Yuan (แยกตามสินค้าแล้ว) ✅
+                    round(c_thb_final_total, 2), # Total_THB
+                    rate_money,         # Yuan_Rate
+                    ship_rate,          # Ship_Rate
+                    round(c_cbm_total, 4),  # CBM (แยกตามสินค้าแล้ว) ✅
+                    round(c_ship_cost_total, 2), # Ship_Cost
+                    round(c_weight_total, 2), # Transport_Weight (แยกตามสินค้าแล้ว) ✅
+                    round(c_unit_yuan, 4),  # Unit Yuan Price
+                    p_s, p_l, p_t,      # Shopee, Laz, TikTok
+                    note,               # Note
+                    link_shop,          # Link
+                    wechat,             # WeChat
+                    exp_date.strftime("%Y-%m-%d") if exp_date else "" # Expected_Date
+                ]
+                rows_to_save.append(row_data)
+
+            # Call Save Function
+            if save_po_batch_to_sheet(rows_to_save):
+                st.success(f"✅ บันทึก {len(rows_to_save)} รายการเรียบร้อยแล้ว!")
+                # Clear Session State
+                if "mi_items_df" in st.session_state: del st.session_state.mi_items_df
+                time.sleep(1.5)
+                st.session_state.active_dialog = None
+                st.rerun()
+
 
 # ==========================================
 # 6. NAVIGATION & LOGIC
@@ -1354,14 +1529,24 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
     col_head, col_action = st.columns([4, 3])
     with col_head: st.subheader("📋 สรุปรายการสั่งซื้อสินค้า")
     with col_action:
-        b1, b2, b3 = st.columns(3)
-        if b1.button("➕ เพิ่ม PO นำเข้า", type="primary"): 
+        # ปรับ columns เป็น 4 ช่อง
+        b1, b2, b3, b4 = st.columns(4) 
+        
+        if b1.button("➕ PO (Batch)", type="primary", use_container_width=True): 
             st.session_state.active_dialog = "po_batch"
             st.rerun()
-        if b2.button("➕ PO ภายใน", type="secondary"): 
+            
+        # --- ปุ่มใหม่ที่คุณต้องการ ---
+        if b2.button("➕ PO หลายรายการ", type="primary", use_container_width=True):
+            st.session_state.active_dialog = "po_multi_item"
+            st.rerun()
+        # ------------------------
+
+        if b3.button("➕ PO ภายใน", type="secondary", use_container_width=True): 
             st.session_state.active_dialog = "po_internal"
             st.rerun()
-        if b3.button("🔍 ค้นหา & แก้ไข", type="secondary"): 
+            
+        if b4.button("🔍 ค้นหา/แก้ไข", type="secondary", use_container_width=True): 
             st.session_state.active_dialog = "po_search"
             st.rerun()
 
@@ -1654,3 +1839,4 @@ elif st.session_state.active_dialog == "po_edit_direct":
     data = st.session_state.get("target_edit_data", {})
     po_edit_dialog_v2(pre_selected_po=data.get("po"), pre_selected_pid=data.get("pid"))
 elif st.session_state.active_dialog == "history": show_history_dialog(fixed_product_id=st.session_state.get("selected_product_history"))
+elif st.session_state.active_dialog == "po_multi_item": po_multi_item_dialog()
