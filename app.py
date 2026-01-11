@@ -392,6 +392,22 @@ def save_po_batch_to_sheet(rows_data):
     except Exception as e:
         st.error(f"❌ บันทึก Batch ไม่สำเร็จ: {e}")
         return False
+def delete_po_row_from_sheet(row_index):
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.worksheet(TAB_NAME_PO)
+        
+        # ลบแถวตาม Index (Google Sheet เริ่มนับแถว 1, ข้อมูลเริ่มแถว 2)
+        ws.delete_rows(int(row_index))
+        
+        st.cache_data.clear() # ล้าง Cache เพื่อให้ข้อมูลอัปเดตทันที
+        return True
+    except Exception as e:
+        st.error(f"❌ ลบข้อมูลไม่สำเร็จ: {e}")
+        return False
+
 
 def update_master_limits(df_edited):
     try:
@@ -896,6 +912,32 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     time.sleep(1)
                     st.rerun()
 
+@st.dialog("🗑️ ยืนยันการลบรายการ", width="small")
+def delete_confirm_dialog():
+    # ดึงค่า Index ที่ส่งมาทางตัวแปร Session
+    target_idx = st.session_state.get("target_delete_idx")
+    target_po = st.session_state.get("target_delete_po")
+    
+    st.warning(f"คุณต้องการลบรายการ PO: {target_po} หรือไม่?")
+    st.caption("⚠️ การกระทำนี้ไม่สามารถย้อนกลับได้ (Cannot Undo)")
+    
+    col_yes, col_no = st.columns(2)
+    if col_yes.button("✅ ยืนยันลบ", type="primary", use_container_width=True):
+        with st.spinner("กำลังลบข้อมูล..."):
+            if delete_po_row_from_sheet(target_idx):
+                st.success("ลบข้อมูลเรียบร้อยแล้ว!")
+                # ล้างค่าใน Session และ Query Params
+                st.session_state.active_dialog = None
+                del st.session_state["target_delete_idx"]
+                if "delete_idx" in st.query_params: del st.query_params["delete_idx"]
+                time.sleep(1)
+                st.rerun()
+                
+    if col_no.button("❌ ยกเลิก", use_container_width=True):
+        st.session_state.active_dialog = None
+        if "delete_idx" in st.query_params: del st.query_params["delete_idx"]
+        st.rerun()
+
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
     if st.session_state.get("need_reset_inputs", False):
@@ -1350,7 +1392,22 @@ if "edit_po" in st.query_params and "edit_pid" in st.query_params:
     st.session_state.active_dialog = "po_edit_direct"
     st.session_state.current_page = "📝 รายการสั่งซื้อ" # <--- บรรทัดสำคัญ: บังคับให้เป็นหน้านี้
     st.rerun()
-
+if "delete_idx" in st.query_params:
+    d_idx = st.query_params["delete_idx"]
+    d_po = st.query_params.get("del_po", "Unknown")
+    
+    # เก็บค่าเข้า Session เพื่อส่งให้ Dialog
+    st.session_state.target_delete_idx = d_idx
+    st.session_state.target_delete_po = d_po
+    
+    # ล้าง Query Params เพื่อไม่ให้รีเฟรชแล้วลบซ้ำ
+    del st.query_params["delete_idx"]
+    if "del_po" in st.query_params: del st.query_params["del_po"]
+    
+    # เปิด Dialog ยืนยัน
+    st.session_state.active_dialog = "delete_confirm"
+    st.session_state.current_page = "📝 รายการสั่งซื้อ"
+    st.rerun()
 # -------------------------------------------
 
 selected_page = st.radio(
@@ -1704,8 +1761,16 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     curr_token = st.query_params.get("token", "")
                     ts = int(time.time() * 1000)
                     edit_link = f"?edit_po={row['PO_Number']}&edit_pid={row['Product_ID']}&t={ts}&token={curr_token}"
-                    edit_btn_html = f"""<a href="{edit_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ffc107; cursor:pointer;">✏️</a>"""
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{edit_btn_html}</td>'
+                    # --- แก้ไขปุ่ม Action (Edit & Delete) ---
+                    edit_btn_html = f"""<a href="{edit_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ffc107; cursor:pointer; margin-right: 8px;" title="แก้ไข">✏️</a>"""
+                    
+                    # สร้าง Link สำหรับลบ (ส่ง Index ของแถวไป)
+                    row_idx_to_delete = row.get("Sheet_Row_Index", 0)
+                    delete_link = f"?delete_idx={row_idx_to_delete}&del_po={row['PO_Number']}&token={curr_token}"
+                    delete_btn_html = f"""<a href="{delete_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ff4b4b; cursor:pointer;" title="ลบรายการ">🗑️</a>"""
+                    
+                    # รวมปุ่มไว้ในช่องเดียวกัน
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{edit_btn_html}{delete_btn_html}</td>'
 
                     table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
                     img_src = row.get('Image', '')
@@ -1848,3 +1913,4 @@ elif st.session_state.active_dialog == "po_edit_direct":
     po_edit_dialog_v2(pre_selected_po=data.get("po"), pre_selected_pid=data.get("pid"))
 elif st.session_state.active_dialog == "history": show_history_dialog(fixed_product_id=st.session_state.get("selected_product_history"))
 elif st.session_state.active_dialog == "po_multi_item": po_multi_item_dialog()
+elif st.session_state.active_dialog == "delete_confirm": delete_confirm_dialog()
