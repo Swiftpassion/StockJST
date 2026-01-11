@@ -801,7 +801,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
 
                     # --- New: Total CBM & Weight Section ---
                     st.markdown("---")
-                    st.markdown('<span style="color:#ff4b4b;"><b>🚚 อัปเดต CBM/Weight รวม (ระบบจะหารเฉลี่ยให้อัตโนมัติ)</b></span>', unsafe_allow_html=True)
+                    st.markdown('<span style="color:#ff4b4b;"><b>🚚 อัปเดต คิว/น้ำหนัก รวม (ระบบจะหารเฉลี่ยให้อัตโนมัติ)</b></span>', unsafe_allow_html=True)
                     cw1, cw2 = st.columns(2)
                     
                     # ลองหาค่ารวม CBM เดิมของ PO นี้ (ถ้าหาไม่ได้ให้เป็น 0)
@@ -813,7 +813,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     total_cbm_input = cw1.number_input("จำนวนคิวทั้งหมด (Total CBM)", min_value=0.0, value=float(sum_cbm_existing), step=0.001, format="%.4f", key="e_tot_cbm")
                     total_weight_input = cw2.number_input("จำนวนน้ำหนักทั้งหมด (Total KG)", min_value=0.0, value=float(sum_weight_existing), step=0.1, format="%.2f", key="e_tot_weight")
                     
-                    apply_avg_to_all = st.checkbox(f"✅ ต้องการนำ CBM/Weight นี้ไปหารเฉลี่ยให้สินค้าทุกรายการใน PO: {po_current_num}", value=True)
+                    apply_avg_to_all = st.checkbox(f"✅ ต้องการนำ คิว/น้ำหนัก นี้ไปหารเฉลี่ยให้สินค้าทุกรายการใน PO : {po_current_num}", value=True)
 
                 # --- Row 3: Sales & Note ---
                 st.markdown("---")
@@ -2009,7 +2009,14 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     # รวมปุ่มไว้ในช่องเดียวกัน
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{edit_btn_html}{delete_btn_html}</td>'
 
-                    table_html += f'<td rowspan="{row_count}" class="td-merged"><b>{row["Product_ID"]}</b><br><small>{row.get("Product_Name","")[:15]}..</small></td>'
+                    # แปลง " เป็น &quot; เพื่อไม่ให้ HTML Error
+                    full_pname = str(row.get("Product_Name", "")).replace('"', '&quot;')
+                    # ใส่ title="{full_pname}" เพื่อให้เมาส์ชี้แล้วขึ้นชื่อเต็ม
+                    # ใส่ style max-width และ text-overflow: ellipsis เพื่อให้ถ้าชื่อยาวมากจะขึ้น ... แทนที่จะดันตารางจนเละ
+                    table_html += f'<td rowspan="{row_count}" class="td-merged" title="{full_pname}">'
+                    table_html += f'<b>{row["Product_ID"]}</b><br>'
+                    table_html += f'<div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin: 0 auto; font-size: 12px;">{full_pname}</div>'
+                    table_html += '</td>'
                     img_src = row.get('Image', '')
                     img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{img_html}</td>'
