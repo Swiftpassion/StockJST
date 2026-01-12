@@ -230,23 +230,51 @@ def get_stock_from_sheet():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
+        # ลบช่องว่างหัวตาราง (เผื่อมีเว้นวรรคหน้าหลัง)
         df.columns = df.columns.astype(str).str.strip()
+        
+        # ==========================================
+        # 🛠️ MAPPING COLUMN (อัปเดตใหม่ตามไฟล์ JST)
+        # ==========================================
         col_map = {
+            # --- 1. รหัสสินค้า (Product ID) ---
             'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'ID': 'Product_ID',
+            'รหัสSKU': 'Product_ID',  # <--- อัปเดตใหม่
+            
+            # --- 2. ชื่อสินค้า (Product Name) ---
             'ชื่อสินค้า': 'Product_Name', 'ชื่อ': 'Product_Name', 'Name': 'Product_Name',
+            
+            # --- 3. รูปภาพ (Image) ---
             'รูป': 'Image', 'รูปภาพ': 'Image', 'Link รูป': 'Image',
+            'รูปภาพ SKU': 'Image',    # <--- อัปเดตใหม่
+            'รูปภาพ SPU': 'Image',    # (สำรอง)
+            
+            # --- 4. จำนวนสต็อก (Initial Stock) ---
             'Stock': 'Initial_Stock', 'จำนวน': 'Initial_Stock', 'สต็อก': 'Initial_Stock', 'คงเหลือ': 'Initial_Stock',
+            'สินค้าคงคลัง': 'Initial_Stock', 
+            'จํานวนที่ใช้ได้': 'Initial_Stock', # <--- อัปเดตใหม่
+            
+            # --- 5. จุดเตือนขั้นต่ำ (Min Limit) ---
             'Min_Limit': 'Min_Limit', 'Min': 'Min_Limit', 'จุดเตือน': 'Min_Limit',
+            'สต็อกความปลอดภัยน้อยสุด': 'Min_Limit',
+            'จำนวนน้อยสุดในการเติมสินค้า (MIN)': 'Min_Limit', # <--- อัปเดตใหม่
+            
+            # --- 6. หมวดหมู่ (Type) ---
             'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type'
         }
+        
+        # เปลี่ยนชื่อคอลัมน์ตาม Map ที่ตั้งไว้
         df = df.rename(columns={k:v for k,v in col_map.items() if k in df.columns})
         
+        # เติมค่า Default หากคอลัมน์ขาดหายไป
         if 'Initial_Stock' not in df.columns: df['Initial_Stock'] = 0
         if 'Product_ID' not in df.columns: df['Product_ID'] = "Unknown"
         if 'Product_Name' not in df.columns: df['Product_Name'] = df['Product_ID']
         if 'Product_Type' not in df.columns: df['Product_Type'] = "ทั่วไป"
         
+        # แปลงข้อมูลตัวเลขให้ถูกต้อง
         df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
+        
         return df
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล Master Stock ไม่ได้: {e}")
@@ -1771,9 +1799,14 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     html_table += "</tr></thead><tbody>"
                     
                     for idx, row in final_df.iterrows():
-                        current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
-                        h_link = f"?history_pid={row['Product_ID']}&token={curr_token}"
-                        
+                    current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
+    
+                    # --- แก้ไขใหม่ (New Fix) ---
+                    # แปลงรหัสสินค้าที่มีภาษาไทยหรือเว้นวรรค ให้เป็น format ที่ปลอดภัยสำหรับ URL
+                    safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
+                    h_link = f"?history_pid={safe_pid}&token={curr_token}"
+                    # -------------------------
+    
                         html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
                         if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
