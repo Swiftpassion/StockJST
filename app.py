@@ -1798,15 +1798,16 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
                     
+                    # 👇 แก้ไขตรงนี้: ต้องย่อหน้าบรรทัดข้างล่าง for เข้าไป 1 ระดับ (Tab)
                     for idx, row in final_df.iterrows():
-                    current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
-    
-                    # --- แก้ไขใหม่ (New Fix) ---
-                    # แปลงรหัสสินค้าที่มีภาษาไทยหรือเว้นวรรค ให้เป็น format ที่ปลอดภัยสำหรับ URL
-                    safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
-                    h_link = f"?history_pid={safe_pid}&token={curr_token}"
-                    # -------------------------
-    
+                        current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
+        
+                        # --- แก้ไขใหม่ (New Fix) ---
+                        # แปลงรหัสสินค้าที่มีภาษาไทยหรือเว้นวรรค ให้เป็น format ที่ปลอดภัยสำหรับ URL
+                        safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
+                        h_link = f"?history_pid={safe_pid}&token={curr_token}"
+                        # -------------------------
+        
                         html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
                         if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
@@ -1819,6 +1820,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                             day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
                             html_table += f'<td class="col-small {day_class}">{int(day_value) if isinstance(day_value, (int, float)) else day_value}</td>'
                         html_table += '</tr>'
+                        
                     html_table += "</tbody></table></div>"
                     st.markdown(html_table, unsafe_allow_html=True)
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
