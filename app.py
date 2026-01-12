@@ -1837,29 +1837,41 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         # Merge กับ Master Data
         df_display = pd.merge(df_po_filter, df_master[['Product_ID','Product_Name','Image','Product_Type']], on='Product_ID', how='left')
 
-        # ✅ สร้างคอลัมน์ "ตัวเลือกค้นหา" (Search Label) : PO + SKU + ชื่อสินค้า
-        df_display['Search_Label'] = df_display.apply(
-            lambda x: f"{x['PO_Number']} : {x['Product_ID']} {str(x['Product_Name'])}", axis=1
-        )
+        # ==================================================================================
+        # ✅ [STEP 1] เตรียมข้อมูลตัวเลือก (Search Options)
+        # ==================================================================================
+        # 1. เตรียมรายการเลข PO
+        po_options = sorted(df_display['PO_Number'].astype(str).unique().tolist(), reverse=True)
         
-        # ดึงรายชื่อทั้งหมดมาทำเป็นตัวเลือก (เรียงลำดับล่าสุดก่อน)
-        search_options = sorted(df_display['Search_Label'].unique().tolist(), reverse=True)
+        # 2. เตรียมรายการสินค้า (SKU : Product Name)
+        df_display['Product_Label'] = df_display.apply(
+            lambda x: f"{x['Product_ID']} : {str(x['Product_Name'])}", axis=1
+        )
+        product_options = sorted(df_display['Product_Label'].unique().tolist())
 
         # ==================================================================================
-        # ✅ [STEP 2] แสดงตัวกรอง (UI Filters)
+        # ✅ [STEP 2] แสดงตัวกรอง (UI Filters) - ปรับแยกช่อง PO / SKU
         # ==================================================================================
         with st.container(border=True):
             st.markdown("##### 🔍 ตัวกรองและค้นหา")
-            c_search, c_status, c_cat = st.columns([2, 1.5, 1.5])
             
-            with c_search:
-                # 👉 เปลี่ยนจาก text_input เป็น multiselect ตามที่คุณต้องการ
-                sel_search_items = st.multiselect(
-                    "🔍 ค้นหา (เลือกจากรายการ)", 
-                    options=search_options,
-                    placeholder="พิมพ์เลข PO, SKU หรือชื่อสินค้า..."
+            # แบ่งคอลัมน์ใหม่: PO | SKU | Status | Category
+            c_po, c_sku, c_status, c_cat = st.columns([1.5, 2.0, 1.2, 1.3])
+            
+            with c_po:
+                sel_po_items = st.multiselect(
+                    "📄 เลข PO", 
+                    options=po_options,
+                    placeholder="เลือกเลข PO..."
                 )
                 
+            with c_sku:
+                sel_sku_items = st.multiselect(
+                    "📦 SKU / ชื่อสินค้า", 
+                    options=product_options,
+                    placeholder="เลือกสินค้า..."
+                )
+            
             with c_status:
                 sel_status = st.selectbox("สถานะ:", ["ทั้งหมด", "สินค้าใกล้ถึง", "รอจัดส่ง", "สินค้าไม่ครบ", "เรียบร้อย"])
             with c_cat:
@@ -1868,6 +1880,7 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     all_types += sorted(df_master['Product_Type'].astype(str).unique().tolist())
                 sel_cat_po = st.selectbox("หมวดหมู่สินค้า", all_types, key="po_cat_filter")
             
+            # ส่วนกรองวันที่
             c_check, c_d1, c_d2 = st.columns([1, 1.5, 1.5])
             with c_check:
                 use_date_filter = st.checkbox("📅 กรองตามวันที่", value=False)
@@ -1880,9 +1893,13 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         # ✅ [STEP 3] กรองข้อมูลตามที่เลือก (Filtering Logic)
         # ==================================================================================
         
-        # 1. กรองตาม Search Box (Dropdown)
-        if sel_search_items:
-            df_display = df_display[df_display['Search_Label'].isin(sel_search_items)]
+        # 1. กรองตามเลข PO
+        if sel_po_items:
+            df_display = df_display[df_display['PO_Number'].astype(str).isin(sel_po_items)]
+
+        # 2. กรองตาม SKU / สินค้า
+        if sel_sku_items:
+            df_display = df_display[df_display['Product_Label'].isin(sel_sku_items)]
 
         # 2. กรองตามวันที่ (ถ้าติ๊ก)
         if use_date_filter:
