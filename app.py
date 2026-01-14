@@ -1797,7 +1797,8 @@ all_years = [today.year - i for i in range(3)]
 
 # --- Page 1 (Daily Sales) ---
 # --- Page 2: Daily Sales Summary (แก้ไขให้ดึงไฟล์ JST) ---
-elif st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
+# --- เปลี่ยน elif เป็น if ตรงนี้เพื่อแก้ Error ครับ ---
+if st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
     st.subheader("📅 สรุปยอดขายรายวัน")
     
     if "history_pid" in st.query_params:
@@ -1889,7 +1890,7 @@ elif st.session_state.current_page == "📅 สรุปยอดขายรา
                     final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
                     
                     # =========================================================
-                    # 🔥 LOGIC ใหม่: ดึงยอดคงเหลือจากไฟล์ JST (เพิ่มส่วนนี้เข้าไป)
+                    # 🔥 LOGIC ใหม่: ดึงยอดคงเหลือจากไฟล์ JST
                     # =========================================================
                     
                     # 1. โหลดข้อมูลจากไฟล์ JST
@@ -1933,7 +1934,7 @@ elif st.session_state.current_page == "📅 สรุปยอดขายรา
                     st.divider()
                     st.markdown(f"**📊 แสดงผล:** ({len(final_df)} รายการ)")
                     
-                    # CSS & HTML Table (ส่วนแสดงผลเหมือนเดิม)
+                    # CSS & HTML Table
                     st.markdown("""
                     <style>
                         .daily-sales-table-wrapper { overflow: auto; width: 100%; max-height: 800px; margin-top: 10px; background: #1c1c1c; border-radius: 8px; border: 1px solid #444; }
