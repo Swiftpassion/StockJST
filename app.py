@@ -589,56 +589,78 @@ def update_master_limits(df_edited):
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_STOCK)
+        
+        # ดึง Header มาเช็ค
         headers = ws.row_values(1)
         target_col_name = "Min_Limit"
         
-        # เช็คว่ามีหัวข้อ Min_Limit หรือยัง ถ้าไม่มีให้เพิ่ม
+        # 1. เช็คว่ามีคอลัมน์ Min_Limit หรือยัง ถ้าไม่มีให้สร้างใหม่
         if target_col_name not in headers:
             ws.update_cell(1, len(headers) + 1, target_col_name)
             col_index = len(headers) + 1
+            # อัปเดต headers ใหม่หลังจากเพิ่มคอลัมน์
+            headers = ws.row_values(1)
         else:
             col_index = headers.index(target_col_name) + 1
         
+        # 2. เตรียมข้อมูลสำหรับบันทึก
         all_rows = ws.get_all_values()
-        if len(all_rows) < 2: return
-        header_row = all_rows[0]
+        if len(all_rows) < 2: return # ถ้าไม่มีข้อมูลสินค้าเลย
         
-        # หา Index ของรหัสสินค้า
+        # หา Index ของรหัสสินค้า (Product_ID) ใน Google Sheet
         pid_idx = -1
-        for i, h in enumerate(header_row):
+        for i, h in enumerate(headers):
             if h in ['รหัสสินค้า', 'รหัส', 'ID', 'Product_ID']:
                 pid_idx = i
                 break
-        if pid_idx == -1: return
         
-        # แปลงข้อมูลจากตารางแก้ไขเป็น Dictionary
-        limit_map = df_edited.set_index('Product_ID')['Min_Limit'].to_dict()
+        if pid_idx == -1: 
+            st.error("❌ ไม่พบคอลัมน์รหัสสินค้าใน Google Sheet")
+            return
         
+        # สร้าง Map ข้อมูลจากหน้าเว็บ: {รหัสสินค้า: ค่าจุดเตือนใหม่}
+        # แปลงค่าว่างหรือ error ให้เป็น 0 เสมอ
+        limit_map = {}
+        for index, row in df_edited.iterrows():
+            pid = str(row['Product_ID']).strip()
+            try:
+                # พยายามแปลงเป็นตัวเลข
+                val = row['Min_Limit']
+                if pd.isna(val) or val == "":
+                    limit_map[pid] = 0
+                else:
+                    limit_map[pid] = int(float(val))
+            except:
+                limit_map[pid] = 0
+        
+        # 3. เตรียมข้อมูลที่จะ Update ลง Sheet (เรียงตามบรรทัดจริง)
         values_to_update = []
+        
+        # วนลูปตั้งแต่แถวที่ 2 (ข้าม Header)
         for row in all_rows[1:]:
-            pid = str(row[pid_idx]) if len(row) > pid_idx else ""
+            # ดึงรหัสสินค้าของแถวนั้นๆ มาเช็ค
+            row_pid = str(row[pid_idx]).strip() if len(row) > pid_idx else ""
             
-            # ค่าเดิมใน Sheet (กรณีไม่ได้แก้)
-            old_val = 0
-            if len(row) >= col_index:
-                try: old_val = int(float(str(row[col_index-1]).replace(",", "")))
-                except: old_val = 0
-            
-            # ถ้ามีในรายการแก้ไข ให้ใช้ค่าใหม่
-            if pid in limit_map: 
-                try:
-                    # ✅ FIX: บังคับแปลงเป็น int เพื่อป้องกัน Error
-                    new_val = int(float(limit_map[pid]))
-                    values_to_update.append([new_val])
-                except:
-                    values_to_update.append([old_val])
-            else: 
+            if row_pid in limit_map:
+                # ถ้ามีรหัสนี้ในหน้าเว็บ ให้ใช้ค่าใหม่จากหน้าเว็บ (สำคัญที่สุด)
+                values_to_update.append([limit_map[row_pid]])
+            else:
+                # ถ้าไม่มีในหน้าเว็บ ให้ใช้ค่าเดิมที่มีอยู่ (ถ้าอ่านไม่ได้ให้เป็น 0)
+                old_val = 0
+                if len(row) >= col_index:
+                    try:
+                        old_val = int(float(str(row[col_index-1]).replace(",", "")))
+                    except:
+                        old_val = 0
                 values_to_update.append([old_val])
 
+        # 4. บันทึกลง Google Sheet ทีเดียว (Batch Update)
         range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
         ws.update(range_name, values_to_update)
-        st.toast("✅ บันทึกจุดเตือนเรียบร้อยแล้ว!", icon="💾")
-        st.cache_data.clear()
+        
+        st.toast("✅ บันทึกค่าจุดเตือนเรียบร้อยแล้ว!", icon="💾")
+        st.cache_data.clear() # ล้าง Cache เพื่อให้ข้อมูลอัปเดตทันที
+        
     except Exception as e:
         st.error(f"❌ บันทึกจุดเตือนไม่สำเร็จ: {e}")
 
@@ -2386,38 +2408,42 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
         df_stock_report['Current_Stock'] = pd.to_numeric(df_stock_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
 
         # 2. จัดการ Min_Limit ให้เป็นตัวเลขเท่านั้น (แก้จุดที่ Error)
-        if 'Min_Limit' not in df_stock_report.columns: 
-            df_stock_report['Min_Limit'] = 0 # Default เป็น 0
+        # 1. จัดการค่า Min_Limit ให้สะอาด (Clean Data)
+        if 'Min_Limit' not in df_stock_report.columns:
+            df_stock_report['Min_Limit'] = 0
             
-        # ✅ FIX: แปลงค่า Min_Limit เป็นตัวเลข (ถ้าเป็นค่าว่าง "" หรือ Text จะกลายเป็น 0 ทันที ไม่ Error)
+        # บังคับแปลง Min_Limit เป็นตัวเลข (ถ้า Error หรือว่าง ให้เป็น 0)
         df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(0).astype(int)
-        
-        # 3. ฟังก์ชันคำนวณสถานะ (ตาม Requirement ใหม่)
-        def calc_status(row):
-            try:
-                curr = int(row['Current_Stock'])
-                limit = int(row['Min_Limit'])
-                
-                if curr <= 0: 
-                    return "🔴 หมดเกลี้ยง"
-                elif curr < limit: # ถ้าคงเหลือน้อยกว่าจุดเตือน
-                    return "⚠️ ของใกล้หมด" # ✅ เปลี่ยนข้อความตามที่ขอ
-                else:
-                    return "🟢 มีของ"
-            except:
-                return "🟢 มีของ" # กรณีข้อมูลผิดพลาดให้ถือว่าปกติไว้ก่อน
 
+        # 2. จัดการ Current_Stock ให้เป็นตัวเลข
+        df_stock_report['Current_Stock'] = pd.to_numeric(df_stock_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
+
+        # 3. ฟังก์ชันคำนวณสถานะ
+        def calc_status(row):
+            current = row['Current_Stock']
+            limit = row['Min_Limit']
+            
+            if current <= 0:
+                return "🔴 หมดเกลี้ยง"  # ถ้าเป็น 0 หรือติดลบ
+            elif current < limit: 
+                return "⚠️ ของใกล้หมด" # ✅ ถ้าเหลือน้อยกว่าจุดเตือน ให้ขึ้นเตือนทันที
+            else:
+                return "🟢 มีของ"      # นอกนั้นถือว่าปกติ
+
+        # สร้าง Column Status ใหม่
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
         # =========================================================
-        # ส่วนแสดงผล UI (Update ตัวเลือก Filter ให้ตรงกัน)
+        # ส่วนแสดงผล (UI)
         # =========================================================
-
+        
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
-            # อัปเดต options ใน Multiselect ให้ตรงกับข้อความใหม่
-            with col_filter: selected_status = st.multiselect("ตัวกรองสถานะ", options=["🔴 หมดเกลี้ยง", "⚠️ ของใกล้หมด", "🟢 มีของ"], default=[])
-            with col_search: search_text = st.text_input("🔍 ค้นหา (ชื่อสินค้า / รหัส)", value="")
+            # ปรับตัวเลือก Filter ให้ตรงกับคำใหม่
+            with col_filter: 
+                selected_status = st.multiselect("ตัวกรองสถานะ", options=["🔴 หมดเกลี้ยง", "⚠️ ของใกล้หมด", "🟢 มีของ"], default=[])
+            with col_search: 
+                search_text = st.text_input("🔍 ค้นหา (ชื่อสินค้า / รหัส)", value="")
             with col_reset:
                 if st.button("❌", use_container_width=True): st.rerun()
 
