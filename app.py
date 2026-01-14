@@ -75,6 +75,7 @@ MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
 TAB_NAME_STOCK = "MASTER"
 TAB_NAME_PO = "PO_DATA"
 FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
+FOLDER_ID_STOCK_ACTUAL = "1-hXu2RG2gNKMkW3ZFBFfhjQEhTacVYzk"
 
 @st.cache_resource
 def get_credentials():
@@ -385,6 +386,64 @@ def get_sale_from_folder():
         return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     except Exception as e:
         st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
+        return pd.DataFrame()
+@st.cache_data(ttl=300)
+def get_actual_stock_from_folder():
+    """ฟังก์ชันดึงยอดคงเหลือจริงจากโฟลเดอร์ DATA STOCK JST"""
+    try:
+        creds = get_credentials()
+        service = build('drive', 'v3', credentials=creds)
+        
+        # ค้นหาไฟล์ Excel ในโฟลเดอร์
+        results = service.files().list(
+            q=f"'{FOLDER_ID_STOCK_ACTUAL}' in parents and trashed=false", 
+            orderBy='modifiedTime desc', pageSize=50, fields="files(id, name)"
+        ).execute()
+        items = results.get('files', [])
+        
+        if not items: return pd.DataFrame()
+        
+        all_dfs = [] 
+        for item in items:
+            if not item['name'].endswith(('.xlsx', '.xls')): continue
+            try:
+                # ดาวน์โหลดไฟล์
+                request = service.files().get_media(fileId=item['id'])
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False: status, done = downloader.next_chunk()
+                fh.seek(0)
+                
+                # อ่านไฟล์ Excel
+                temp_df = pd.read_excel(fh)
+                
+                # 🛠️ MAPPING COLUMN: พยายามเดาชื่อคอลัมน์ในไฟล์ JST (แก้ตรงนี้ถ้าชื่อไม่ตรง)
+                col_map = {
+                    'รหัสสินค้า': 'Product_ID', 'รหัส': 'Product_ID', 'SKU': 'Product_ID', 'Item No': 'Product_ID',
+                    'คงเหลือ': 'Real_Stock', 'จำนวน': 'Real_Stock', 'Stock': 'Real_Stock', 'Total': 'Real_Stock',
+                    'ยอดคงเหลือ': 'Real_Stock', 'On Hand': 'Real_Stock'
+                }
+                temp_df = temp_df.rename(columns={k:v for k,v in col_map.items() if k in temp_df.columns})
+                
+                # เอาเฉพาะที่มีคอลัมน์สำคัญ
+                if 'Product_ID' in temp_df.columns and 'Real_Stock' in temp_df.columns:
+                     # แปลงตัวเลขให้ชัวร์
+                    temp_df['Real_Stock'] = pd.to_numeric(temp_df['Real_Stock'], errors='coerce').fillna(0).astype(int)
+                    temp_df['Product_ID'] = temp_df['Product_ID'].astype(str).str.strip()
+                    all_dfs.append(temp_df[['Product_ID', 'Real_Stock']])
+            except Exception as err:
+                print(f"Error reading file {item['name']}: {err}")
+                continue
+
+        # รวมทุกไฟล์ (กรณีมีหลายไฟล์) แล้ว Group by รหัสสินค้า (เผื่อซ้ำ)
+        if all_dfs:
+            final_df = pd.concat(all_dfs, ignore_index=True)
+            return final_df.groupby('Product_ID', as_index=False)['Real_Stock'].sum()
+        
+        return pd.DataFrame()
+    except Exception as e:
+        st.warning(f"⚠️ อ่านไฟล์ Stock จริงไม่ทัน/เกิดข้อผิดพลาด: {e}")
         return pd.DataFrame()
 
 # --- Functions: Save Data ---
@@ -2164,7 +2223,12 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
 # --- Page 3: Stock ---
 elif st.session_state.current_page == "📈 รายงาน Stock":
     st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
+    
+    # 1. โหลดข้อมูล Stock จริงมารอก่อน
+    df_real_stock = get_actual_stock_from_folder()
+    
     if not df_master.empty and 'Product_ID' in df_master.columns:
+        # เตรียมข้อมูลพื้นฐานจาก Master และ PO
         if not df_po.empty and 'Product_ID' in df_po.columns:
             df_po_latest = df_po.drop_duplicates(subset=['Product_ID'], keep='last')
             df_stock_report = pd.merge(df_master, df_po_latest, on='Product_ID', how='left')
@@ -2172,14 +2236,45 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
             df_stock_report = df_master.copy()
             df_stock_report['PO_Number'] = ""
         
+        # คำนวณยอดขายและสต็อกตั้งต้น
         total_sales_map = {}
         if not df_sale.empty and 'Product_ID' in df_sale.columns:
             total_sales_map = df_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
         
         df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
         df_stock_report['Total_Sold_All'] = df_stock_report['Product_ID'].map(total_sales_map).fillna(0).astype(int)
+        
         if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
-        df_stock_report['Current_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
+        
+        # =========================================================
+        # 🔥 LOGIC สำคัญ: การคำนวณยอดคงเหลือ (Current Stock)
+        # =========================================================
+        
+        # สูตร 1: คำนวณปกติ (Master - Sales)
+        df_stock_report['Calculated_Stock'] = df_stock_report['Initial_Stock'] - df_stock_report['Recent_Sold']
+        
+        # สูตร 2: ถ้ามีไฟล์จริง ให้เอาไฟล์จริงมา Map
+        if not df_real_stock.empty:
+            real_stock_map = df_real_stock.set_index('Product_ID')['Real_Stock'].to_dict()
+            df_stock_report['Real_Stock_File'] = df_stock_report['Product_ID'].map(real_stock_map)
+            
+            # ** ถ้ามี Real Stock ในไฟล์ ให้ใช้ค่าจากไฟล์ / ถ้าไม่มี ให้ใช้ค่าจากการคำนวณ **
+            df_stock_report['Current_Stock'] = df_stock_report.apply(
+                lambda x: x['Real_Stock_File'] if pd.notna(x['Real_Stock_File']) else x['Calculated_Stock'], 
+                axis=1
+            )
+            # สร้างตัวแปรบอกแหล่งที่มาข้อมูล (เพื่อแสดงผลให้รู้ว่าเลขนี้มาจากไหน)
+            df_stock_report['Source'] = df_stock_report['Real_Stock_File'].apply(lambda x: "✅ ไฟล์จริง" if pd.notna(x) else "🧮 คำนวณ")
+        else:
+            # ถ้าไม่มีไฟล์จริงเลย ใช้สูตรคำนวณล้วน
+            df_stock_report['Current_Stock'] = df_stock_report['Calculated_Stock']
+            df_stock_report['Source'] = "🧮 คำนวณ"
+
+        # แปลงเป็น int ให้สวยงาม
+        df_stock_report['Current_Stock'] = df_stock_report['Current_Stock'].astype(int)
+        
+        # =========================================================
+
         if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
         
         def calc_status(row):
@@ -2200,14 +2295,21 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
         if search_text: edit_df = edit_df[edit_df['Product_Name'].str.contains(search_text, case=False) | edit_df['Product_ID'].str.contains(search_text, case=False)]
 
         col_ctrl1, col_ctrl2 = st.columns([3, 1])
-        with col_ctrl1: st.info(f"💡 คงเหลือ = Master Stock - ขายล่าสุด ({latest_date_str})")
+        with col_ctrl1: 
+            # แจ้งเตือน logic ให้ user ทราบ
+            if not df_real_stock.empty:
+                st.success(f"📂 พบข้อมูล Stock จริง ({len(df_real_stock)} รายการ) -> ระบบจะใช้ข้อมูลนี้เป็นหลักแทนการคำนวณ")
+            else:
+                st.info(f"💡 คงเหลือ = Master Stock - ขายล่าสุด (เนื่องจากไม่พบไฟล์ Stock จริง)")
+                
         with col_ctrl2: 
              if st.button("💾 บันทึกค่าจุดเตือน", type="primary", use_container_width=True):
                  if "edited_stock_data" in st.session_state:
                      update_master_limits(st.session_state.edited_stock_data)
                      st.rerun()
 
-        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Recent_Sold", "Total_Sold_All", "PO_Number", "Status", "Min_Limit"]
+        # เพิ่ม Source เข้าไปในตารางแสดงผลด้วย
+        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Source", "Recent_Sold", "PO_Number", "Status", "Min_Limit"]
         for c in final_cols:
             if c not in edit_df.columns: edit_df[c] = "" 
 
@@ -2216,6 +2318,8 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
             column_config={
                 "Image": st.column_config.ImageColumn(width=60),
                 "Product_ID": st.column_config.TextColumn(disabled=True),
+                "Current_Stock": st.column_config.NumberColumn("คงเหลือ (ล่าสุด)", help="ถ้ามาจากไฟล์จริงจะขึ้น ✅"),
+                "Source": st.column_config.TextColumn("ที่มาข้อมูล", width="small"),
                 "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0),
             },
             height=1500, use_container_width=True, hide_index=True, key="edited_stock_data"
