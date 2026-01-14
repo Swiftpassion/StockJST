@@ -19,7 +19,12 @@ import gspread
 # ==========================================
 # 1. ตั้งค่า Page & CSS Styles
 # ==========================================
-st.set_page_config(page_title="JST Hybrid System", layout="wide", page_icon="📦")
+st.set_page_config(
+    page_title="JST Stock System",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # CSS สำหรับปรับแต่ง Radio Button ให้หน้าตาเหมือน Tabs และตาราง
 st.markdown("""
@@ -1795,9 +1800,7 @@ thai_months = ["มกราคม", "กุมภาพันธ์", "มี�
 today = date.today()
 all_years = [today.year - i for i in range(3)]
 
-# --- Page 1 (Daily Sales) ---
-# --- Page 2: Daily Sales Summary (แก้ไขให้ดึงไฟล์ JST) ---
-# --- เปลี่ยน elif เป็น if ตรงนี้เพื่อแก้ Error ครับ ---
+# --- Page 2: Daily Sales Summary (แก้ไข CSS ให้ตารางยาวเต็มจอ) ---
 if st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
     st.subheader("📅 สรุปยอดขายรายวัน")
     
@@ -1889,39 +1892,26 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 else:
                     final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
                     
-                    # =========================================================
-                    # 🔥 LOGIC ใหม่: ดึงยอดคงเหลือจากไฟล์ JST
-                    # =========================================================
-                    
                     # 1. โหลดข้อมูลจากไฟล์ JST
                     df_real_stock = get_actual_stock_from_folder()
                     
                     # 2. คำนวณ Current Stock
                     if not df_real_stock.empty:
-                        # สร้าง Dictionary {รหัส : ยอดจริง}
                         real_stock_map = df_real_stock.set_index('Product_ID')['Real_Stock'].to_dict()
                         final_report['Real_Stock_File'] = final_report['Product_ID'].map(real_stock_map)
-                        
-                        # คำนวณสำรอง (สูตรเดิม)
                         stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
-                        calc_stock = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
                         
-                        # เลือกค่า: มีในไฟล์ใช้ไฟล์ / ไม่มีใช้สูตร
                         final_report['Current_Stock'] = final_report.apply(
                             lambda x: x['Real_Stock_File'] if pd.notna(x['Real_Stock_File']) else (stock_map.get(x['Product_ID'], 0) - recent_sales_map.get(x['Product_ID'], 0)), 
                             axis=1
                         )
                     else:
-                        # กรณีไม่เจอไฟล์เลย ใช้สูตรเดิม
                         stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
                         final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
 
-                    # แปลงเป็น int และคำนวณ Status
                     final_report['Current_Stock'] = pd.to_numeric(final_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                     
-                    # =========================================================
-
                     if not df_sale_range.empty:
                          pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                          sorted_day_cols = sorted(day_cols, key=lambda x: pivot_data_temp[pivot_data_temp['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data_temp['Day_Col'].values else 0)
@@ -1934,22 +1924,42 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     st.divider()
                     st.markdown(f"**📊 แสดงผล:** ({len(final_df)} รายการ)")
                     
-                    # CSS & HTML Table
+                    # =========================================================
+                    # 🖌️ แก้ไข CSS ให้ตารางยาวเต็มจอและไม่จำกัดความสูง
+                    # =========================================================
                     st.markdown("""
                     <style>
-                        .daily-sales-table-wrapper { overflow: auto; width: 100%; max-height: 800px; margin-top: 10px; background: #1c1c1c; border-radius: 8px; border: 1px solid #444; }
-                        .daily-sales-table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-family: 'Sarabun', sans-serif; font-size: 11px; color: #ddd; }
+                        /* เอา max-height ออกเพื่อให้ยาวไปเรื่อยๆ ตามข้อมูล */
+                        .daily-sales-table-wrapper { 
+                            overflow-x: auto; 
+                            width: 100%; 
+                            margin-top: 10px; 
+                            background: #1c1c1c; 
+                            border-radius: 8px; 
+                            border: 1px solid #444; 
+                        }
+                        .daily-sales-table { 
+                            width: 100%; 
+                            min-width: 1200px; /* เพิ่มความกว้างขั้นต่ำเพื่อให้ไม่เบียดกัน */
+                            border-collapse: separate; 
+                            border-spacing: 0; 
+                            font-family: 'Sarabun', sans-serif; 
+                            font-size: 11px; 
+                            color: #ddd; 
+                        }
                         .daily-sales-table th, .daily-sales-table td { padding: 4px 6px; line-height: 1.2; text-align: center; border-bottom: 1px solid #333; border-right: 1px solid #333; white-space: nowrap; vertical-align: middle; }
                         .daily-sales-table thead th { position: sticky; top: 0; z-index: 100; background-color: #1e3c72 !important; color: white !important; font-weight: 700; border-bottom: 2px solid #ffffff !important; min-height: 40px; }
                         .daily-sales-table tbody tr:nth-child(even) td { background-color: #262626 !important; }
                         .daily-sales-table tbody tr:nth-child(odd) td { background-color: #1c1c1c !important; }
                         .daily-sales-table tbody tr:hover td { background-color: #333 !important; }
                         .negative-value { color: #FF0000 !important; font-weight: bold !important; }
-                        .col-history { width: 50px !important; min-width: 50px !important; }
-                        .col-small { width: 90px !important; min-width: 90px !important; }
-                        .col-medium { width: 90px !important; min-width: 90px !important; }
-                        .col-image { width: 55px !important; min-width: 55px !important; }
-                        .col-name { width: 150px !important; min-width: 150px !important; text-align: left !important; }
+                        
+                        /* Fix ความกว้างคอลัมน์ให้เหมาะสม */
+                        .col-history { width: 40px !important; min-width: 40px !important; }
+                        .col-small { width: 80px !important; min-width: 80px !important; }
+                        .col-medium { width: 100px !important; min-width: 100px !important; }
+                        .col-image { width: 50px !important; min-width: 50px !important; }
+                        .col-name { width: 250px !important; min-width: 200px !important; text-align: left !important; }
                         a.history-link { text-decoration: none; color: white; font-size: 16px; cursor: pointer; }
                         a.history-link:hover { transform: scale(1.2); }
                     </style>
