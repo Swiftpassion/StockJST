@@ -590,24 +590,18 @@ def update_master_limits(df_edited):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_STOCK)
         
-        # ดึง Header มาเช็ค
+        # 1. เตรียม Header
         headers = ws.row_values(1)
         target_col_name = "Min_Limit"
         
-        # 1. เช็คว่ามีคอลัมน์ Min_Limit หรือยัง ถ้าไม่มีให้สร้างใหม่
         if target_col_name not in headers:
             ws.update_cell(1, len(headers) + 1, target_col_name)
-            col_index = len(headers) + 1
-            # อัปเดต headers ใหม่หลังจากเพิ่มคอลัมน์
-            headers = ws.row_values(1)
+            headers = ws.row_values(1) # อัปเดต header ใหม่
+            col_index = len(headers)
         else:
             col_index = headers.index(target_col_name) + 1
-        
-        # 2. เตรียมข้อมูลสำหรับบันทึก
-        all_rows = ws.get_all_values()
-        if len(all_rows) < 2: return # ถ้าไม่มีข้อมูลสินค้าเลย
-        
-        # หา Index ของรหัสสินค้า (Product_ID) ใน Google Sheet
+            
+        # หา Index รหัสสินค้า
         pid_idx = -1
         for i, h in enumerate(headers):
             if h in ['รหัสสินค้า', 'รหัส', 'ID', 'Product_ID']:
@@ -615,54 +609,58 @@ def update_master_limits(df_edited):
                 break
         
         if pid_idx == -1: 
-            st.error("❌ ไม่พบคอลัมน์รหัสสินค้าใน Google Sheet")
+            st.error("❌ ไม่พบคอลัมน์ Product_ID ใน Google Sheet")
             return
-        
-        # สร้าง Map ข้อมูลจากหน้าเว็บ: {รหัสสินค้า: ค่าจุดเตือนใหม่}
-        # แปลงค่าว่างหรือ error ให้เป็น 0 เสมอ
+
+        # 2. แปลงข้อมูลจากหน้าเว็บ เป็น Dictionary (Clean Data 100%)
+        # สำคัญ: ต้องแปลง Numpy Int เป็น Python Int ไม่งั้น Gspread Error
         limit_map = {}
         for index, row in df_edited.iterrows():
             pid = str(row['Product_ID']).strip()
+            raw_val = row.get('Min_Limit', 0)
+            
             try:
-                # พยายามแปลงเป็นตัวเลข
-                val = row['Min_Limit']
-                if pd.isna(val) or val == "":
-                    limit_map[pid] = 0
-                else:
-                    limit_map[pid] = int(float(val))
+                # แปลงเป็น String ก่อน แล้วค่อยแปลงเป็น Int เพื่อล้าง format แปลกๆ
+                clean_val = int(float(str(raw_val).replace(',', '').strip()))
             except:
-                limit_map[pid] = 0
-        
-        # 3. เตรียมข้อมูลที่จะ Update ลง Sheet (เรียงตามบรรทัดจริง)
+                clean_val = 0
+            
+            limit_map[pid] = clean_val
+
+        # 3. เตรียมข้อมูลลง Sheet
+        all_rows = ws.get_all_values()
         values_to_update = []
         
-        # วนลูปตั้งแต่แถวที่ 2 (ข้าม Header)
-        for row in all_rows[1:]:
-            # ดึงรหัสสินค้าของแถวนั้นๆ มาเช็ค
+        # Loop แถวใน Sheet เพื่อให้ลำดับตรงเป๊ะ
+        for row in all_rows[1:]: # ข้าม Header
             row_pid = str(row[pid_idx]).strip() if len(row) > pid_idx else ""
             
+            # ค่าใหม่ที่จะใส่
+            final_val = 0 
+            
             if row_pid in limit_map:
-                # ถ้ามีรหัสนี้ในหน้าเว็บ ให้ใช้ค่าใหม่จากหน้าเว็บ (สำคัญที่สุด)
-                values_to_update.append([limit_map[row_pid]])
+                final_val = limit_map[row_pid] # ใช้ค่าจากหน้าเว็บ
             else:
-                # ถ้าไม่มีในหน้าเว็บ ให้ใช้ค่าเดิมที่มีอยู่ (ถ้าอ่านไม่ได้ให้เป็น 0)
-                old_val = 0
+                # ถ้าไม่มีในหน้าเว็บ ให้เอาค่าเดิมใน Sheet
                 if len(row) >= col_index:
                     try:
-                        old_val = int(float(str(row[col_index-1]).replace(",", "")))
+                        final_val = int(float(str(row[col_index-1]).replace(",", "")))
                     except:
-                        old_val = 0
-                values_to_update.append([old_val])
+                        final_val = 0
+            
+            # เก็บใส่ List (ต้องเป็น Python list of lists)
+            values_to_update.append([final_val])
 
-        # 4. บันทึกลง Google Sheet ทีเดียว (Batch Update)
-        range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
-        ws.update(range_name, values_to_update)
-        
-        st.toast("✅ บันทึกค่าจุดเตือนเรียบร้อยแล้ว!", icon="💾")
-        st.cache_data.clear() # ล้าง Cache เพื่อให้ข้อมูลอัปเดตทันที
-        
+        # 4. บันทึกจริง
+        if values_to_update:
+            range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
+            ws.update(range_name, values_to_update)
+            st.toast("✅ บันทึกจุดเตือนสำเร็จ!", icon="💾")
+            st.cache_data.clear()
+            time.sleep(1) # รอแป๊บนึงให้ Google Sheet ประมวลผล
+            
     except Exception as e:
-        st.error(f"❌ บันทึกจุดเตือนไม่สำเร็จ: {e}")
+        st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
 
 # ==========================================
 # 5. Main App & Data Loading
@@ -2434,35 +2432,62 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
         # =========================================================
-        # ส่วนแสดงผล (UI)
+        # ส่วนแสดงผล UI และปุ่มบันทึก (แก้ใหม่)
         # =========================================================
-        
+
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
-            # ปรับตัวเลือก Filter ให้ตรงกับคำใหม่
             with col_filter: 
                 selected_status = st.multiselect("ตัวกรองสถานะ", options=["🔴 หมดเกลี้ยง", "⚠️ ของใกล้หมด", "🟢 มีของ"], default=[])
             with col_search: 
-                search_text = st.text_input("🔍 ค้นหา (ชื่อสินค้า / รหัส)", value="")
+                search_text = st.text_input("🔍 ค้นหา", value="")
             with col_reset:
                 if st.button("❌", use_container_width=True): st.rerun()
 
+        # กรองข้อมูลก่อนแสดงผล
         edit_df = df_stock_report.copy()
-        if selected_status: edit_df = edit_df[edit_df['Status'].isin(selected_status)]
-        if search_text: edit_df = edit_df[edit_df['Product_Name'].str.contains(search_text, case=False) | edit_df['Product_ID'].str.contains(search_text, case=False)]
+        if selected_status: 
+            edit_df = edit_df[edit_df['Status'].isin(selected_status)]
+        if search_text: 
+            edit_df = edit_df[edit_df['Product_Name'].str.contains(search_text, case=False) | edit_df['Product_ID'].str.contains(search_text, case=False)]
 
-        col_ctrl1, col_ctrl2 = st.columns([3, 1])
-        with col_ctrl1: 
-            if not df_real_stock.empty:
-                st.success(f"📂 พบข้อมูล Stock จริง ({len(df_real_stock)} รายการ) -> ใช้ยอดจากไฟล์ JST")
-            else:
-                st.info(f"💡 ไม่พบไฟล์ Stock จริง -> ใช้สูตรคำนวณ (ตั้งต้น - ขาย)")
-                
-        with col_ctrl2: 
-             if st.button("💾 บันทึกค่าจุดเตือน", type="primary", use_container_width=True):
-                 if "edited_stock_data" in st.session_state:
-                     update_master_limits(st.session_state.edited_stock_data)
-                     st.rerun()
+        # จัดการคอลัมน์ให้ครบ
+        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Source", "Recent_Sold", "PO_Number", "Status", "Min_Limit"]
+        for c in final_cols:
+            if c not in edit_df.columns: edit_df[c] = "" 
+
+        # --- ส่วนแสดงตารางและปุ่ม (จุดสำคัญ) ---
+        
+        # 1. แสดงตารางและรับค่าที่แก้มาใส่ตัวแปร result_df
+        result_df = st.data_editor(
+            edit_df[final_cols],
+            column_config={
+                "Image": st.column_config.ImageColumn("รูป", width=60),
+                "Product_ID": st.column_config.TextColumn("รหัส", disabled=True),
+                "Product_Name": st.column_config.TextColumn("ชื่อสินค้า", disabled=True, width="medium"),
+                "Current_Stock": st.column_config.NumberColumn("คงเหลือ", disabled=True),
+                "Status": st.column_config.TextColumn("สถานะ", disabled=True),
+                "Source": st.column_config.TextColumn("ที่มา", disabled=True),
+                # Min_Limit แก้ไขได้
+                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน (แก้ไขได้)", min_value=0, step=1, required=True),
+            },
+            height=600, 
+            use_container_width=True, 
+            hide_index=True, 
+            key="stock_editor_key" # ตั้ง Key ไว้
+        )
+
+        st.divider()
+        
+        # 2. ปุ่มบันทึก (ดึงค่าจาก result_df โดยตรง)
+        col_btn1, col_btn2 = st.columns([3, 1])
+        with col_btn1:
+            st.caption(f"แสดงผล {len(result_df)} รายการ | ใส่ตัวเลขในช่อง 'จุดเตือน' แล้วกดบันทึก")
+        with col_btn2:
+            if st.button("💾 บันทึกค่าจุดเตือน", type="primary", use_container_width=True):
+                # ส่ง Dataframe ที่แก้แล้วไปบันทึก
+                update_master_limits(result_df)
+                st.rerun()
 
         final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Source", "Recent_Sold", "PO_Number", "Status", "Min_Limit"]
         for c in final_cols:
