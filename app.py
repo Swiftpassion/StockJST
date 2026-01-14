@@ -591,6 +591,8 @@ def update_master_limits(df_edited):
         ws = sh.worksheet(TAB_NAME_STOCK)
         headers = ws.row_values(1)
         target_col_name = "Min_Limit"
+        
+        # เช็คว่ามีหัวข้อ Min_Limit หรือยัง ถ้าไม่มีให้เพิ่ม
         if target_col_name not in headers:
             ws.update_cell(1, len(headers) + 1, target_col_name)
             col_index = len(headers) + 1
@@ -600,6 +602,8 @@ def update_master_limits(df_edited):
         all_rows = ws.get_all_values()
         if len(all_rows) < 2: return
         header_row = all_rows[0]
+        
+        # หา Index ของรหัสสินค้า
         pid_idx = -1
         for i, h in enumerate(header_row):
             if h in ['รหัสสินค้า', 'รหัส', 'ID', 'Product_ID']:
@@ -607,17 +611,29 @@ def update_master_limits(df_edited):
                 break
         if pid_idx == -1: return
         
+        # แปลงข้อมูลจากตารางแก้ไขเป็น Dictionary
         limit_map = df_edited.set_index('Product_ID')['Min_Limit'].to_dict()
+        
         values_to_update = []
         for row in all_rows[1:]:
             pid = str(row[pid_idx]) if len(row) > pid_idx else ""
-            old_val = 10
-            if len(row) >= col_index:
-                try: old_val = int(row[col_index-1])
-                except: old_val = 10
             
-            if pid in limit_map: values_to_update.append([int(limit_map[pid])])
-            else: values_to_update.append([old_val])
+            # ค่าเดิมใน Sheet (กรณีไม่ได้แก้)
+            old_val = 0
+            if len(row) >= col_index:
+                try: old_val = int(float(str(row[col_index-1]).replace(",", "")))
+                except: old_val = 0
+            
+            # ถ้ามีในรายการแก้ไข ให้ใช้ค่าใหม่
+            if pid in limit_map: 
+                try:
+                    # ✅ FIX: บังคับแปลงเป็น int เพื่อป้องกัน Error
+                    new_val = int(float(limit_map[pid]))
+                    values_to_update.append([new_val])
+                except:
+                    values_to_update.append([old_val])
+            else: 
+                values_to_update.append([old_val])
 
         range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
         ws.update(range_name, values_to_update)
@@ -2363,7 +2379,7 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
             df_stock_report['Source'] = "🧮 คำนวณ"
 
         # =========================================================
-        # 🛠️ LOGIC 2: (สำคัญ) การคำนวณสถานะและแก้ Error
+        # 🛠️ LOGIC 2: การคำนวณสถานะและแก้ Error (แก้ไขใหม่)
         # =========================================================
 
         # 1. บังคับให้ Current_Stock เป็นตัวเลข (กันเหนียว)
@@ -2371,32 +2387,36 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
 
         # 2. จัดการ Min_Limit ให้เป็นตัวเลขเท่านั้น (แก้จุดที่ Error)
         if 'Min_Limit' not in df_stock_report.columns: 
-            df_stock_report['Min_Limit'] = 10
+            df_stock_report['Min_Limit'] = 0 # Default เป็น 0
             
-        # แปลงค่า Min_Limit เป็นตัวเลข (ถ้าเป็นค่าว่าง "" หรือ Text จะกลายเป็น 0)
+        # ✅ FIX: แปลงค่า Min_Limit เป็นตัวเลข (ถ้าเป็นค่าว่าง "" หรือ Text จะกลายเป็น 0 ทันที ไม่ Error)
         df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(0).astype(int)
         
-        # 3. ฟังก์ชันคำนวณสถานะ (ปลอดภัยขึ้น)
+        # 3. ฟังก์ชันคำนวณสถานะ (ตาม Requirement ใหม่)
         def calc_status(row):
             try:
                 curr = int(row['Current_Stock'])
                 limit = int(row['Min_Limit'])
                 
-                if curr <= 0: return "🔴 หมดเกลี้ยง"
-                elif curr < limit: return "⚠️ ใกล้หมด"
-                return "🟢 มีของ"
+                if curr <= 0: 
+                    return "🔴 หมดเกลี้ยง"
+                elif curr < limit: # ถ้าคงเหลือน้อยกว่าจุดเตือน
+                    return "⚠️ ของใกล้หมด" # ✅ เปลี่ยนข้อความตามที่ขอ
+                else:
+                    return "🟢 มีของ"
             except:
                 return "🟢 มีของ" # กรณีข้อมูลผิดพลาดให้ถือว่าปกติไว้ก่อน
 
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
 
         # =========================================================
-        # ส่วนแสดงผล UI (เหมือนเดิม)
+        # ส่วนแสดงผล UI (Update ตัวเลือก Filter ให้ตรงกัน)
         # =========================================================
 
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
-            with col_filter: selected_status = st.multiselect("ตัวกรองสถานะ", options=["🔴 หมดเกลี้ยง", "⚠️ ใกล้หมด", "🟢 มีของ"], default=[])
+            # อัปเดต options ใน Multiselect ให้ตรงกับข้อความใหม่
+            with col_filter: selected_status = st.multiselect("ตัวกรองสถานะ", options=["🔴 หมดเกลี้ยง", "⚠️ ของใกล้หมด", "🟢 มีของ"], default=[])
             with col_search: search_text = st.text_input("🔍 ค้นหา (ชื่อสินค้า / รหัส)", value="")
             with col_reset:
                 if st.button("❌", use_container_width=True): st.rerun()
