@@ -2488,22 +2488,7 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
                 # ส่ง Dataframe ที่แก้แล้วไปบันทึก
                 update_master_limits(result_df)
                 st.rerun()
-
-        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Source", "Recent_Sold", "PO_Number", "Status", "Min_Limit"]
-        for c in final_cols:
-            if c not in edit_df.columns: edit_df[c] = "" 
-
-        st.data_editor(
-            edit_df[final_cols],
-            column_config={
-                "Image": st.column_config.ImageColumn(width=60),
-                "Product_ID": st.column_config.TextColumn(disabled=True),
-                "Current_Stock": st.column_config.NumberColumn("คงเหลือ (ล่าสุด)", help="ถ้ามาจากไฟล์จริงจะขึ้น ✅"),
-                "Source": st.column_config.TextColumn("ที่มาข้อมูล", width="small"),
-                "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน*(แก้ไขได้)", min_value=0),
-            },
-            height=1500, use_container_width=True, hide_index=True, key="edited_stock_data"
-        )
+                
     else: st.warning("ไม่พบข้อมูล Master Product")
 
 # ==========================================
