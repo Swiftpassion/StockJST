@@ -317,6 +317,38 @@ def get_po_data():
     except Exception as e:
         st.error(f"❌ อ่านข้อมูล PO ไม่ได้: {e}")
         return pd.DataFrame()
+def get_next_auto_po():
+    """ฟังก์ชันคำนวณหาเลข รอเลขสินค้าเข้าXXX ตัวถัดไป"""
+    prefix = "รอเลขสินค้าเข้า"
+    
+    # ดึงข้อมูล PO ปัจจุบันมาเช็ค
+    df = get_po_data()
+    
+    if df.empty:
+        return f"{prefix}001"
+
+    # กรองเฉพาะ PO ที่ขึ้นต้นด้วย prefix นี้
+    # แปลงเป็น string ก่อนเผื่อมีข้อมูลขยะ
+    mask = df['PO_Number'].astype(str).str.startswith(prefix)
+    existing_pos = df.loc[mask, 'PO_Number'].unique()
+
+    if len(existing_pos) == 0:
+        return f"{prefix}001"
+
+    max_num = 0
+    for po in existing_pos:
+        try:
+            # ตัด prefix ออกแล้วแปลงเป็นตัวเลข
+            num_part = str(po).replace(prefix, "")
+            num_val = int(num_part)
+            if num_val > max_num:
+                max_num = num_val
+        except:
+            continue
+
+    new_num = max_num + 1
+    return f"{prefix}{new_num:03d}"
+
 
 @st.cache_data(ttl=300)
 def get_sale_from_folder():
@@ -1083,113 +1115,21 @@ def delete_confirm_dialog():
         st.rerun()
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
-    # --- Function: คำนวณวันที่คาดการณ์อัตโนมัติ ---
-    def auto_update_batch_date():
-        t = st.session_state.get("bp_trans", "ทางรถ")
-        d = st.session_state.get("bp_ord_date", date.today())
-        
-        days_add = 0
-        if t == "ทางรถ": days_add = 14
-        elif t == "ทางเรือ": days_add = 25
-        
-        if d:
-            st.session_state.bp_expected_date = d + timedelta(days=days_add)
-
-    # --- Reset Logic ---
-    if st.session_state.get("need_reset_inputs", False):
-        keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_cost_yuan", "bp_cbm", "bp_weight", 
-                         "bp_note", "bp_shop_s", "bp_shop_l", "bp_shop_t", "bp_expected_date", 
-                         "bp_recv_date", "bp_ship_rate"]
-        for key in keys_to_reset:
-            if key in st.session_state: del st.session_state[key]
-        st.session_state["need_reset_inputs"] = False
-        
-        # หลัง Reset ให้คำนวณวันที่ใหม่ตาม Header ปัจจุบัน
-        auto_update_batch_date()
-
-    # --- 1. Header Section ---
-    with st.container(border=True):
-        st.subheader("1. ข้อมูลเอกสาร (Header)")
-        c1, c2, c3 = st.columns(3)
-        po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
-        
-        # เพิ่ม on_change
-        transport_type = c2.selectbox(
-            "การขนส่ง", 
-            ["ทางรถ", "ทางเรือ", "สินค้าภายใน"], 
-            key="bp_trans",
-            on_change=auto_update_batch_date
-        )
-        
-        # เพิ่ม on_change
-        order_date = c3.date_input(
-            "วันที่สั่งซื้อ", 
-            date.today(), 
-            key="bp_ord_date",
-            on_change=auto_update_batch_date
-        )
-        
-        # Set Default ถ้ายังไม่มีค่าใน Session State
-        if "bp_expected_date" not in st.session_state:
-            auto_update_batch_date()
-
-    # --- 2. Item Form Section ---
-    with st.container(border=True):
-        st.subheader("2. รายละเอียดสินค้า")
-        prod_list = []
-        if not df_master.empty:
-            prod_list = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        
-        sel_prod = st.selectbox("เลือกสินค้า", prod_list, index=None, key="bp_sel_prod")
-        
-        img_url = ""
-        pid = ""
-        if sel_prod:
-            pid = sel_prod.split(" : ")[0]
-            item_data = df_master[df_master['Product_ID'] == pid]
-            if not item_data.empty: img_url = item_data.iloc[0].get('Image', '')
-
-        with st.form(key="add_item_form", clear_on_submit=False):
-            col_img, col_data = st.columns([1, 4])
-            with col_img:
-                if img_url: st.image(img_url, width=120)
-                else: st.info("No Image")
-
-            with col_data:
-                st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
-                r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-                
-                # ช่องวันที่คาดการณ์ (ค่าจะเปลี่ยนตาม Session State)
-                expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", key="bp_expected_date")
-                
-                qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="bp_qty")
-                rate_money = r1_c3.number_input("เรทเงิน", min_value=0.0, step=0.01, value=5.0, format="%.2f", key="bp_rate")
-                ship_rate = r1_c4.number_input("เรทขนส่ง", min_value=0.0, step=10.0, value=None, format="%.2f", placeholder="XXXXX", key="bp_ship_rate")
-
-                r2_c1, r2_c2 = st.columns([1, 3])
-                total_yuan = r2_c1.number_input("ราคาหยวนทั้งหมด*", min_value=0.0, step=0.01, value=None, format="%.2f", placeholder="XXXXX", key="bp_cost_yuan")
-                note = r2_c2.text_input("หมายเหตุ (ถ้ามี)", placeholder="XXXXX", key="bp_note")
-
-                with st.expander("ข้อมูลเพิ่มเติม (Link / ราคาขาย)"):
-                    l1, l2 = st.columns(2)
-                    link_shop = l1.text_input("Link", key="bp_link")
-                    wechat = l2.text_input("WeChat", key="bp_wechat")
-                    p1, p2, p3 = st.columns(3)
-                    p_shopee = p1.number_input("Shopee", value=None, placeholder="0.00", key="bp_shop_s")
-                    p_lazada = p2.number_input("Lazada", value=None, placeholder="0.00", key="bp_shop_l")
-                    p_tiktok = p3.number_input("TikTok", value=None, placeholder="0.00", key="bp_shop_t")
-
-                st.markdown("---")
-                st.markdown('<span style="color:#ff0000; font-weight:bold;">(กรอกตอนสินค้าเข้า)</span>', unsafe_allow_html=True)
-                r3_c1, r3_c2, r3_c3 = st.columns(3)
-                recv_date = r3_c1.date_input("วันที่ได้รับสินค้า", value=None, key="bp_recv_date")
-                cbm_val = r3_c2.number_input("ขนาดคิว (คิว)", min_value=0.0, step=0.001, value=None, format="%.4f", key="bp_cbm")
-                weight_val = r3_c3.number_input("น้ำหนัก", min_value=0.0, step=0.1, value=None, format="%.2f", key="bp_weight")
+    # ... (code ส่วนต้นของ function เหมือนเดิม ไม่ต้องแก้) ...
+    # ... (ข้ามมาจนถึงส่วนปุ่ม Submit ท้าย function) ...
 
             if st.form_submit_button("➕ เพิ่มรายการลงตระกร้า", type="primary"):
-                if not po_number or not sel_prod:
-                    st.error("กรุณากรอก เลข PO และ เลือกสินค้า")
+                # --- แก้ไข: ตรวจสอบแค่สินค้า ส่วน PO ถ้าว่างให้ Gen Auto ---
+                if not sel_prod:
+                    st.error("กรุณาเลือกสินค้า")
                 else:
+                    # Logic Auto PO
+                    final_po_num = po_number
+                    if not final_po_num:
+                        final_po_num = get_next_auto_po()
+                        st.toast(f"ℹ️ ใช้เลข PO อัตโนมัติ: {final_po_num}")
+
+                    # เตรียมตัวแปรสำหรับบันทึก
                     c_qty = qty if qty is not None else 0
                     c_total_yuan = total_yuan if total_yuan is not None else 0.0
                     c_rate = rate_money if rate_money is not None else 0.0
@@ -1205,7 +1145,7 @@ def po_batch_dialog():
                     if recv_date and order_date: wait_days = (recv_date - order_date).days
 
                     item = {
-                        "SKU": pid, "PO": po_number, "Trans": transport_type, "Ord": str(order_date), 
+                        "SKU": pid, "PO": final_po_num, "Trans": transport_type, "Ord": str(order_date), 
                         "Exp": str(expected_date) if expected_date else "",   
                         "Recv": str(recv_date) if recv_date else "", "Wait": wait_days,
                         "Qty": int(c_qty), "UnitTHB": round(unit_thb_final, 2),
@@ -1222,6 +1162,8 @@ def po_batch_dialog():
                     st.rerun()
 
     if st.session_state.po_temp_cart:
+        # ... (ส่วนแสดงตระกร้าด้านล่างเหมือนเดิม ไม่ต้องแก้) ...
+        # ... (แต่ต้องก็อปปี้ส่วน save_po_batch_to_sheet ด้านล่างมาด้วยเพื่อให้ครบ function) ...
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
         cart_df = pd.DataFrame(st.session_state.po_temp_cart)
@@ -1343,9 +1285,15 @@ def po_internal_batch_dialog():
                 p_tiktok = r4_c3.number_input("TikTok", value=None, placeholder="0.00", key="int_shop_t")
 
             if st.form_submit_button("➕ เพิ่มรายการลงตระกร้า", type="primary"):
-                if not po_number or not sel_prod:
-                    st.error("กรุณากรอก เลข PO และ เลือกสินค้า")
+                if not sel_prod:
+                    st.error("กรุณาเลือกสินค้า")
                 else:
+                    # Logic Auto PO
+                    final_po_num = po_number
+                    if not final_po_num:
+                        final_po_num = get_next_auto_po()
+                        st.toast(f"ℹ️ ใช้เลข PO อัตโนมัติ: {final_po_num}")
+
                     c_qty = qty if qty is not None else 0
                     c_total_thb = total_thb if total_thb is not None else 0.0
                     unit_thb = c_total_thb / c_qty if c_qty > 0 else 0
@@ -1353,7 +1301,7 @@ def po_internal_batch_dialog():
                     if recv_date and order_date: wait_days = (recv_date - order_date).days
 
                     item = {
-                        "SKU": pid, "PO": po_number, 
+                        "SKU": pid, "PO": final_po_num, 
                         "Trans": "สินค้าภายใน", "Ord": str(order_date), 
                         "Exp": str(expected_date) if expected_date else "",   
                         "Recv": str(recv_date) if recv_date else "", "Wait": wait_days,
@@ -1367,6 +1315,7 @@ def po_internal_batch_dialog():
                     st.session_state["need_reset_inputs_int"] = True
                     st.rerun()
 
+    # ... (ส่วนแสดงตระกร้าด้านล่าง function internal เหมือนเดิม ไม่ต้องแก้) ...
     if st.session_state.po_temp_cart:
         st.divider()
         st.write(f"🛒 ตระกร้า ({len(st.session_state.po_temp_cart)} รายการ)")
@@ -1554,11 +1503,16 @@ def po_multi_item_dialog():
     
     # Save Button Logic
     if st.button("💾 บันทึก PO รายการทั้งหมด", type="primary", use_container_width=True):
-        if not po_number:
-            st.error("❌ กรุณากรอกเลข PO")
-        elif total_qty_calculated <= 0:
+        # --- แก้ไข: เอาเงื่อนไข po_number ออกจากการตรวจสอบ ---
+        if total_qty_calculated <= 0:
             st.error("❌ กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ")
         else:
+            # Logic Auto PO
+            final_po_num = po_number
+            if not final_po_num:
+                final_po_num = get_next_auto_po()
+                st.toast(f"ℹ️ บันทึกโดยใช้เลข: {final_po_num}")
+
             c_rate_money = rate_money if rate_money is not None else 0.0
             c_ship_rate = ship_rate if ship_rate is not None else 0.0
 
@@ -1589,7 +1543,7 @@ def po_multi_item_dialog():
                         final_wait_days = (recv_date - ord_date).days
 
                 row_data = [
-                    c_sku, po_number, transport, ord_date.strftime("%Y-%m-%d"),
+                    c_sku, final_po_num, transport, ord_date.strftime("%Y-%m-%d"), # ใช้ final_po_num ตรงนี้
                     final_recv_date_str, final_wait_days, c_qty, final_qty_recv,
                     round(c_unit_thb, 2), round(c_yuan_total, 2), round(c_thb_final_total, 2),
                     c_rate_money, c_ship_rate, round(c_cbm_total, 4), round(c_ship_cost_total, 2), round(c_weight_total, 2), round(c_unit_yuan, 4),
