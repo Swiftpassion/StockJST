@@ -74,8 +74,8 @@ st.markdown("""
 MASTER_SHEET_ID = "1SC_Dpq2aiMWsS3BGqL_Rdf7X4qpTFkPA0wPV6mqqosI"
 TAB_NAME_STOCK = "MASTER"
 TAB_NAME_PO = "PO_DATA"
-FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 FOLDER_ID_STOCK_ACTUAL = "1-hXu2RG2gNKMkW3ZFBFfhjQEhTacVYzk"
+FOLDER_ID_DATA_SALE = "12jyMKgFHoc9-_eRZ-VN9QLsBZ31ZJP4T"
 
 @st.cache_resource
 def get_credentials():
@@ -389,12 +389,12 @@ def get_sale_from_folder():
         return pd.DataFrame()
 @st.cache_data(ttl=60)
 def get_actual_stock_from_folder():
-    """ฟังก์ชันดึงยอดคงเหลือจริงจากโฟลเดอร์ DATA STOCK JST (แบบหาบรรทัดหัวตารางอัตโนมัติ)"""
+    """ฟังก์ชันดึงยอดคงเหลือจริงจากโฟลเดอร์ DATA STOCK JST (ค้นหาหัวตารางอัตโนมัติ)"""
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
         
-        # ค้นหาไฟล์ Excel
+        # ค้นหาไฟล์ Excel ล่าสุด
         results = service.files().list(
             q=f"'{FOLDER_ID_STOCK_ACTUAL}' in parents and trashed=false", 
             orderBy='modifiedTime desc', pageSize=50, fields="files(id, name)"
@@ -415,68 +415,62 @@ def get_actual_stock_from_folder():
                 while done is False: status, done = downloader.next_chunk()
                 fh.seek(0)
                 
-                # อ่านไฟล์แบบไม่มี Header มาก่อน (เพื่อจะไปวนลูปหาเอง)
+                # อ่านไฟล์แบบไม่มี Header มาก่อนเพื่อสแกนหาบรรทัดหัวตาราง
                 temp_raw = pd.read_excel(fh, header=None)
                 
-                # =========================================================
-                # 🕵️‍♂️ HEADER HUNTER: วนลูปหาบรรทัดที่เป็นหัวตารางจริง
-                # =========================================================
-                header_row_index = -1
-                
-                # ลองวนดู 10 บรรทัดแรก
+                # --- 🔍 Auto-Detect Header Row ---
+                header_row = 0
                 for i in range(min(10, len(temp_raw))):
-                    row_values = temp_raw.iloc[i].astype(str).str.strip().tolist()
-                    # เช็คว่าบรรทัดนี้มีคำว่า "SKU" หรือ "รหัส" หรือ "Code" หรือไม่
-                    if any(keyword in val for val in row_values for keyword in ['รหัสSKU', 'SKU', 'รหัสสินค้า', 'Item No', 'Product Code']):
-                        header_row_index = i
+                    # แปลงแถวเป็น Text แล้วหาคำคีย์เวิร์ด
+                    row_str = temp_raw.iloc[i].astype(str).str.cat(sep=' ')
+                    if 'SKU' in row_str or 'รหัส' in row_str or 'Item' in row_str:
+                        header_row = i
                         break
                 
-                # ถ้าหาไม่เจอ ให้ลองถือว่าบรรทัดแรกคือ Header (Fallback)
-                if header_row_index == -1:
-                    header_row_index = 0
-
-                # ตั้งค่า Header ใหม่ตามบรรทัดที่เจอ
-                temp_raw.columns = temp_raw.iloc[header_row_index] # ตั้งชื่อคอลัมน์
-                temp_df = temp_raw[header_row_index + 1:].copy() # เอาข้อมูลตั้งแต่บรรทัดถัดไป
+                # อ่านใหม่อีกครั้งโดยระบุบรรทัดหัวตารางที่ถูกต้อง
+                fh.seek(0)
+                temp_df = pd.read_excel(fh, header=header_row)
                 
-                # =========================================================
-                # 🛠️ MAPPING COLUMN (ใช้ระบบค้นหาคำ)
-                # =========================================================
-                temp_df.columns = temp_df.columns.astype(str).str.strip() # ล้างชื่อคอลัมน์
-                
-                # ฟังก์ชันช่วยหาชื่อคอลัมน์
-                def find_col(df, keywords):
-                    for col in df.columns:
-                        for kw in keywords:
-                            if kw in col: return col
-                    return None
+                # ล้างชื่อคอลัมน์ (ลบวรรคหน้าหลัง)
+                temp_df.columns = temp_df.columns.astype(str).str.strip()
 
-                # หา ID (หาคำว่า: SKU, รหัส)
-                id_col = find_col(temp_df, ['รหัสSKU', 'SKU', 'รหัส', 'Item No', 'Product_ID'])
+                # --- 🛠️ Mapping Column ---
+                col_map = {}
                 
-                # หา Stock (หาคำว่า: ใช้ได้, คงเหลือ, Stock)
-                stock_col = find_col(temp_df, ['ใช้ได้', 'คงเหลือ', 'Stock', 'จำนวน', 'Total'])
+                # หาคอลัมน์รหัสสินค้า
+                for col in temp_df.columns:
+                    if col in ['รหัสSKU', 'SKU', 'รหัสสินค้า', 'รหัส', 'Item No']:
+                        col_map[col] = 'Product_ID'
+                        break
+                
+                # หาคอลัมน์ยอดคงเหลือ (เน้น "ใช้ได้")
+                for col in temp_df.columns:
+                    # เช็คคำว่า "ใช้ได้", "คงเหลือ", "Stock"
+                    if any(x in col for x in ['ใช้ได้', 'คงเหลือ', 'Stock', 'จำนวน', 'Total']):
+                        col_map[col] = 'Real_Stock'
+                        break
 
-                if id_col and stock_col:
-                    temp_df = temp_df.rename(columns={id_col: 'Product_ID', stock_col: 'Real_Stock'})
-                    
-                    # แปลงข้อมูล
+                # เปลี่ยนชื่อคอลัมน์
+                temp_df = temp_df.rename(columns=col_map)
+                
+                # ถ้าเจอครบทั้ง 2 คอลัมน์ ให้ดึงข้อมูลออกมา
+                if 'Product_ID' in temp_df.columns and 'Real_Stock' in temp_df.columns:
+                    # แปลงตัวเลขและรหัสให้ถูกต้อง
                     temp_df['Real_Stock'] = pd.to_numeric(temp_df['Real_Stock'], errors='coerce').fillna(0).astype(int)
                     temp_df['Product_ID'] = temp_df['Product_ID'].astype(str).str.strip()
-                    
-                    # กรองบรรทัดว่างทิ้ง
-                    temp_df = temp_df[temp_df['Product_ID'] != 'nan']
-                    temp_df = temp_df[temp_df['Product_ID'] != '']
+                    # กรองข้อมูลว่างทิ้ง
+                    temp_df = temp_df[temp_df['Product_ID'].str.len() > 0]
                     
                     all_dfs.append(temp_df[['Product_ID', 'Real_Stock']])
-                    # print(f"✅ ไฟล์ {item['name']} พบ Header ที่บรรทัด {header_row_index}") # Debug
-                
+                    
             except Exception as err:
                 print(f"Error reading file {item['name']}: {err}")
                 continue
 
+        # รวมข้อมูลทั้งหมด
         if all_dfs:
             final_df = pd.concat(all_dfs, ignore_index=True)
+            # Group by เพื่อรวมยอดสินค้ารหัสเดียวกัน
             return final_df.groupby('Product_ID', as_index=False)['Real_Stock'].sum()
         
         return pd.DataFrame()
