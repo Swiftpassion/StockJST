@@ -1796,7 +1796,8 @@ today = date.today()
 all_years = [today.year - i for i in range(3)]
 
 # --- Page 1 (Daily Sales) ---
-if st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
+# --- Page 2: Daily Sales Summary (แก้ไขให้ดึงไฟล์ JST) ---
+elif st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
     st.subheader("📅 สรุปยอดขายรายวัน")
     
     if "history_pid" in st.query_params:
@@ -1816,6 +1817,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
+    # --- ส่วน UI Filter ---
     with st.container(border=True):
         st.markdown("##### 🔍 ตัวกรองข้อมูล")
         c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
@@ -1885,10 +1887,40 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 if final_report.empty: st.warning(f"⚠️ ไม่พบข้อมูลสินค้า")
                 else:
                     final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
-                    stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
-                    final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0)).astype(int)
+                    
+                    # =========================================================
+                    # 🔥 LOGIC ใหม่: ดึงยอดคงเหลือจากไฟล์ JST (เพิ่มส่วนนี้เข้าไป)
+                    # =========================================================
+                    
+                    # 1. โหลดข้อมูลจากไฟล์ JST
+                    df_real_stock = get_actual_stock_from_folder()
+                    
+                    # 2. คำนวณ Current Stock
+                    if not df_real_stock.empty:
+                        # สร้าง Dictionary {รหัส : ยอดจริง}
+                        real_stock_map = df_real_stock.set_index('Product_ID')['Real_Stock'].to_dict()
+                        final_report['Real_Stock_File'] = final_report['Product_ID'].map(real_stock_map)
+                        
+                        # คำนวณสำรอง (สูตรเดิม)
+                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                        calc_stock = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
+                        
+                        # เลือกค่า: มีในไฟล์ใช้ไฟล์ / ไม่มีใช้สูตร
+                        final_report['Current_Stock'] = final_report.apply(
+                            lambda x: x['Real_Stock_File'] if pd.notna(x['Real_Stock_File']) else (stock_map.get(x['Product_ID'], 0) - recent_sales_map.get(x['Product_ID'], 0)), 
+                            axis=1
+                        )
+                    else:
+                        # กรณีไม่เจอไฟล์เลย ใช้สูตรเดิม
+                        stock_map = df_master.set_index('Product_ID')['Initial_Stock'].to_dict()
+                        final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
+
+                    # แปลงเป็น int และคำนวณ Status
+                    final_report['Current_Stock'] = pd.to_numeric(final_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
                     final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
                     
+                    # =========================================================
+
                     if not df_sale_range.empty:
                          pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                          sorted_day_cols = sorted(day_cols, key=lambda x: pivot_data_temp[pivot_data_temp['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data_temp['Day_Col'].values else 0)
@@ -1901,6 +1933,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     st.divider()
                     st.markdown(f"**📊 แสดงผล:** ({len(final_df)} รายการ)")
                     
+                    # CSS & HTML Table (ส่วนแสดงผลเหมือนเดิม)
                     st.markdown("""
                     <style>
                         .daily-sales-table-wrapper { overflow: auto; width: 100%; max-height: 800px; margin-top: 10px; background: #1c1c1c; border-radius: 8px; border: 1px solid #444; }
@@ -1931,15 +1964,11 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
                     
-                    # 👇 แก้ไขตรงนี้: ต้องย่อหน้าบรรทัดข้างล่าง for เข้าไป 1 ระดับ (Tab)
                     for idx, row in final_df.iterrows():
                         current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
         
-                        # --- แก้ไขใหม่ (New Fix) ---
-                        # แปลงรหัสสินค้าที่มีภาษาไทยหรือเว้นวรรค ให้เป็น format ที่ปลอดภัยสำหรับ URL
                         safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
                         h_link = f"?history_pid={safe_pid}&token={curr_token}"
-                        # -------------------------
         
                         html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
