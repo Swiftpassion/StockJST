@@ -2271,10 +2271,11 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
     else: st.info("ยังไม่มีข้อมูล PO")
 
 # --- Page 3: Stock ---
+# --- Page 3: Stock Report ---
 elif st.session_state.current_page == "📈 รายงาน Stock":
     st.subheader("📈 รายงาน Stock & ตั้งค่าการเตือน")
     
-    # 1. โหลดข้อมูล Stock จริงมารอก่อน
+    # 1. โหลดข้อมูล Stock จริงมารอก่อน (จากไฟล์ JST)
     df_real_stock = get_actual_stock_from_folder()
     
     if not df_master.empty and 'Product_ID' in df_master.columns:
@@ -2291,13 +2292,14 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
         if not df_sale.empty and 'Product_ID' in df_sale.columns:
             total_sales_map = df_sale.groupby('Product_ID')['Qty_Sold'].sum().fillna(0).astype(int).to_dict()
         
+        # Map ยอดขาย
         df_stock_report['Recent_Sold'] = df_stock_report['Product_ID'].map(recent_sales_map).fillna(0).astype(int)
         df_stock_report['Total_Sold_All'] = df_stock_report['Product_ID'].map(total_sales_map).fillna(0).astype(int)
         
         if 'Initial_Stock' not in df_stock_report.columns: df_stock_report['Initial_Stock'] = 0
         
         # =========================================================
-        # 🔥 LOGIC สำคัญ: การคำนวณยอดคงเหลือ (Current Stock)
+        # 🔥 LOGIC 1: การคำนวณยอดคงเหลือ (Current Stock)
         # =========================================================
         
         # สูตร 1: คำนวณปกติ (Master - Sales)
@@ -2313,25 +2315,44 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
                 lambda x: x['Real_Stock_File'] if pd.notna(x['Real_Stock_File']) else x['Calculated_Stock'], 
                 axis=1
             )
-            # สร้างตัวแปรบอกแหล่งที่มาข้อมูล (เพื่อแสดงผลให้รู้ว่าเลขนี้มาจากไหน)
+            # สร้างตัวแปรบอกแหล่งที่มาข้อมูล
             df_stock_report['Source'] = df_stock_report['Real_Stock_File'].apply(lambda x: "✅ ไฟล์จริง" if pd.notna(x) else "🧮 คำนวณ")
         else:
             # ถ้าไม่มีไฟล์จริงเลย ใช้สูตรคำนวณล้วน
             df_stock_report['Current_Stock'] = df_stock_report['Calculated_Stock']
             df_stock_report['Source'] = "🧮 คำนวณ"
 
-        # แปลงเป็น int ให้สวยงาม
-        df_stock_report['Current_Stock'] = df_stock_report['Current_Stock'].astype(int)
-        
+        # =========================================================
+        # 🛠️ LOGIC 2: (สำคัญ) การคำนวณสถานะและแก้ Error
         # =========================================================
 
-        if 'Min_Limit' not in df_stock_report.columns: df_stock_report['Min_Limit'] = 10
+        # 1. บังคับให้ Current_Stock เป็นตัวเลข (กันเหนียว)
+        df_stock_report['Current_Stock'] = pd.to_numeric(df_stock_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
+
+        # 2. จัดการ Min_Limit ให้เป็นตัวเลขเท่านั้น (แก้จุดที่ Error)
+        if 'Min_Limit' not in df_stock_report.columns: 
+            df_stock_report['Min_Limit'] = 10
+            
+        # แปลงค่า Min_Limit เป็นตัวเลข (ถ้าเป็นค่าว่าง "" หรือ Text จะกลายเป็น 0)
+        df_stock_report['Min_Limit'] = pd.to_numeric(df_stock_report['Min_Limit'], errors='coerce').fillna(0).astype(int)
         
+        # 3. ฟังก์ชันคำนวณสถานะ (ปลอดภัยขึ้น)
         def calc_status(row):
-            if row['Current_Stock'] <= 0: return "🔴 หมดเกลี้ยง"
-            elif row['Current_Stock'] < row['Min_Limit']: return "⚠️ ใกล้หมด"
-            return "🟢 มีของ"
+            try:
+                curr = int(row['Current_Stock'])
+                limit = int(row['Min_Limit'])
+                
+                if curr <= 0: return "🔴 หมดเกลี้ยง"
+                elif curr < limit: return "⚠️ ใกล้หมด"
+                return "🟢 มีของ"
+            except:
+                return "🟢 มีของ" # กรณีข้อมูลผิดพลาดให้ถือว่าปกติไว้ก่อน
+
         df_stock_report['Status'] = df_stock_report.apply(calc_status, axis=1)
+
+        # =========================================================
+        # ส่วนแสดงผล UI (เหมือนเดิม)
+        # =========================================================
 
         with st.container(border=True):
             col_filter, col_search, col_reset = st.columns([2, 2, 0.5])
@@ -2346,11 +2367,10 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
 
         col_ctrl1, col_ctrl2 = st.columns([3, 1])
         with col_ctrl1: 
-            # แจ้งเตือน logic ให้ user ทราบ
             if not df_real_stock.empty:
-                st.success(f"📂 พบข้อมูล Stock จริง ({len(df_real_stock)} รายการ) -> ระบบจะใช้ข้อมูลนี้เป็นหลักแทนการคำนวณ")
+                st.success(f"📂 พบข้อมูล Stock จริง ({len(df_real_stock)} รายการ) -> ใช้ยอดจากไฟล์ JST")
             else:
-                st.info(f"💡 คงเหลือ = Master Stock - ขายล่าสุด (เนื่องจากไม่พบไฟล์ Stock จริง)")
+                st.info(f"💡 ไม่พบไฟล์ Stock จริง -> ใช้สูตรคำนวณ (ตั้งต้น - ขาย)")
                 
         with col_ctrl2: 
              if st.button("💾 บันทึกค่าจุดเตือน", type="primary", use_container_width=True):
@@ -2358,7 +2378,6 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
                      update_master_limits(st.session_state.edited_stock_data)
                      st.rerun()
 
-        # เพิ่ม Source เข้าไปในตารางแสดงผลด้วย
         final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Source", "Recent_Sold", "PO_Number", "Status", "Min_Limit"]
         for c in final_cols:
             if c not in edit_df.columns: edit_df[c] = "" 
