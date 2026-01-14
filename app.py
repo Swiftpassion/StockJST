@@ -387,27 +387,37 @@ def get_sale_from_folder():
     except Exception as e:
         st.warning(f"⚠️ อ่านไฟล์ Excel Sale ไม่ทัน: {e}")
         return pd.DataFrame()
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=1) # ปิด Cache ชั่วคราวเพื่อให้เห็นผลทันที
 def get_actual_stock_from_folder():
-    """ฟังก์ชันดึงยอดคงเหลือจริงจากโฟลเดอร์ DATA STOCK JST (ค้นหาหัวตารางอัตโนมัติ)"""
+    """ฟังก์ชันดึงยอดคงเหลือจริง (Mode: ตรวจสอบปัญหา)"""
+    st.info("🕵️‍♂️ เริ่มต้นกระบวนการอ่านไฟล์ Stock...")
+    
     try:
         creds = get_credentials()
         service = build('drive', 'v3', credentials=creds)
         
-        # ค้นหาไฟล์ Excel ล่าสุด
+        # 1. เช็คว่าเจอไฟล์ในโฟลเดอร์ไหม
         results = service.files().list(
             q=f"'{FOLDER_ID_STOCK_ACTUAL}' in parents and trashed=false", 
-            orderBy='modifiedTime desc', pageSize=50, fields="files(id, name)"
+            orderBy='modifiedTime desc', pageSize=10, fields="files(id, name)"
         ).execute()
         items = results.get('files', [])
         
-        if not items: return pd.DataFrame()
+        if not items:
+            st.error(f"❌ ไม่พบไฟล์ในโฟลเดอร์ ID: {FOLDER_ID_STOCK_ACTUAL}")
+            st.warning("👉 คำแนะนำ: กรุณาเช็คว่ากด Share โฟลเดอร์ใน Google Drive ให้กับอีเมล Service Account ของบอทหรือยัง?")
+            return pd.DataFrame()
+            
+        st.success(f"✅ พบไฟล์ทั้งหมด {len(items)} ไฟล์ (กำลังลองอ่านไฟล์ล่าสุด...)")
         
         all_dfs = [] 
         for item in items:
-            if not item['name'].endswith(('.xlsx', '.xls')): continue
+            if not item['name'].endswith(('.xlsx', '.xls')): 
+                st.write(f"⚠️ ข้ามไฟล์ {item['name']} (ไม่ใช่ Excel)")
+                continue
+                
+            st.write(f"📂 กำลังอ่านไฟล์: **{item['name']}**")
             try:
-                # ดาวน์โหลดไฟล์
                 request = service.files().get_media(fileId=item['id'])
                 fh = io.BytesIO()
                 downloader = MediaIoBaseDownload(fh, request)
@@ -415,67 +425,58 @@ def get_actual_stock_from_folder():
                 while done is False: status, done = downloader.next_chunk()
                 fh.seek(0)
                 
-                # อ่านไฟล์แบบไม่มี Header มาก่อนเพื่อสแกนหาบรรทัดหัวตาราง
+                # อ่านแบบดิบๆ มาโชว์ก่อน
                 temp_raw = pd.read_excel(fh, header=None)
                 
-                # --- 🔍 Auto-Detect Header Row ---
-                header_row = 0
-                for i in range(min(10, len(temp_raw))):
-                    # แปลงแถวเป็น Text แล้วหาคำคีย์เวิร์ด
+                # ลองหาบรรทัดหัวตาราง
+                header_row = -1
+                for i in range(min(15, len(temp_raw))):
                     row_str = temp_raw.iloc[i].astype(str).str.cat(sep=' ')
-                    if 'SKU' in row_str or 'รหัส' in row_str or 'Item' in row_str:
+                    # เช็คคำว่า SKU หรือ รหัส
+                    if 'SKU' in row_str or 'รหัส' in row_str:
                         header_row = i
+                        st.success(f"   🎉 เจอบรรทัดหัวตารางที่บรรทัด: {i+1}")
                         break
                 
-                # อ่านใหม่อีกครั้งโดยระบุบรรทัดหัวตารางที่ถูกต้อง
+                if header_row == -1:
+                    st.error(f"   ❌ หาหัวตารางไม่เจอใน 15 บรรทัดแรก (ระบบมองหาคำว่า 'SKU' หรือ 'รหัส')")
+                    st.write("   👀 ข้อมูล 5 บรรทัดแรกที่เห็นคือ:", temp_raw.head(5))
+                    continue
+
+                # อ่านจริง
                 fh.seek(0)
                 temp_df = pd.read_excel(fh, header=header_row)
-                
-                # ล้างชื่อคอลัมน์ (ลบวรรคหน้าหลัง)
                 temp_df.columns = temp_df.columns.astype(str).str.strip()
-
-                # --- 🛠️ Mapping Column ---
+                
+                st.write(f"   📋 ชื่อคอลัมน์ที่อ่านได้: {list(temp_df.columns)}")
+                
+                # Mapping
                 col_map = {}
-                
-                # หาคอลัมน์รหัสสินค้า
                 for col in temp_df.columns:
-                    if col in ['รหัสSKU', 'SKU', 'รหัสสินค้า', 'รหัส', 'Item No']:
-                        col_map[col] = 'Product_ID'
-                        break
+                    if col in ['รหัสSKU', 'SKU', 'รหัสสินค้า', 'รหัส', 'Item No']: col_map[col] = 'Product_ID'
+                    if any(x in col for x in ['ใช้ได้', 'คงเหลือ', 'Stock', 'จำนวน', 'Total']): col_map[col] = 'Real_Stock'
                 
-                # หาคอลัมน์ยอดคงเหลือ (เน้น "ใช้ได้")
-                for col in temp_df.columns:
-                    # เช็คคำว่า "ใช้ได้", "คงเหลือ", "Stock"
-                    if any(x in col for x in ['ใช้ได้', 'คงเหลือ', 'Stock', 'จำนวน', 'Total']):
-                        col_map[col] = 'Real_Stock'
-                        break
-
-                # เปลี่ยนชื่อคอลัมน์
-                temp_df = temp_df.rename(columns=col_map)
-                
-                # ถ้าเจอครบทั้ง 2 คอลัมน์ ให้ดึงข้อมูลออกมา
-                if 'Product_ID' in temp_df.columns and 'Real_Stock' in temp_df.columns:
-                    # แปลงตัวเลขและรหัสให้ถูกต้อง
+                if 'Product_ID' in col_map.values() and 'Real_Stock' in col_map.values():
+                    st.success("   ✅ จับคู่คอลัมน์ครบ! พร้อมใช้งาน")
+                    temp_df = temp_df.rename(columns=col_map)
                     temp_df['Real_Stock'] = pd.to_numeric(temp_df['Real_Stock'], errors='coerce').fillna(0).astype(int)
                     temp_df['Product_ID'] = temp_df['Product_ID'].astype(str).str.strip()
-                    # กรองข้อมูลว่างทิ้ง
-                    temp_df = temp_df[temp_df['Product_ID'].str.len() > 0]
-                    
+                    temp_df = temp_df[temp_df['Product_ID'].str.len() > 1]
                     all_dfs.append(temp_df[['Product_ID', 'Real_Stock']])
+                else:
+                    st.error(f"   ❌ จับคู่คอลัมน์ไม่ครบ (ต้องการ: รหัสสินค้า และ ยอดคงเหลือ)")
                     
             except Exception as err:
-                print(f"Error reading file {item['name']}: {err}")
+                st.error(f"   ❌ Error อ่านไฟล์: {err}")
                 continue
 
-        # รวมข้อมูลทั้งหมด
         if all_dfs:
             final_df = pd.concat(all_dfs, ignore_index=True)
-            # Group by เพื่อรวมยอดสินค้ารหัสเดียวกัน
             return final_df.groupby('Product_ID', as_index=False)['Real_Stock'].sum()
         
         return pd.DataFrame()
     except Exception as e:
-        st.warning(f"⚠️ อ่านไฟล์ Stock ไม่สำเร็จ: {e}")
+        st.error(f"❌ เกิดข้อผิดพลาดร้ายแรง: {e}")
         return pd.DataFrame()
 
 # --- Functions: Save Data ---
