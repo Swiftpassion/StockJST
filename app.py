@@ -1946,7 +1946,30 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
 
                     final_report['Current_Stock'] = pd.to_numeric(final_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
-                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ใกล้หมด" if x<10 else "🟢 ปกติ"))
+
+                    # =========================================================
+                    # 🛠️ LOGIC: คำนวณสถานะตาม "จุดเตือน" (แก้ไขให้ตรงกับหน้า Stock)
+                    # =========================================================
+                    
+                    # 1. เตรียมข้อมูล Min_Limit ให้เป็นตัวเลข
+                    if 'Min_Limit' not in final_report.columns:
+                        final_report['Min_Limit'] = 0
+                    final_report['Min_Limit'] = pd.to_numeric(final_report['Min_Limit'], errors='coerce').fillna(0).astype(int)
+
+                    # 2. ฟังก์ชันเช็คสถานะ
+                    def calc_sales_status(row):
+                        curr = row['Current_Stock']
+                        limit = row['Min_Limit']
+                        
+                        if curr <= 0:
+                            return "🔴 หมด"
+                        elif curr <= limit: # ✅ ถ้าคงเหลือน้อยกว่าหรือเท่ากับจุดเตือน ให้แจ้งเตือนทันที
+                            return "⚠️ ใกล้หมด"
+                        else:
+                            return "🟢 ปกติ"
+
+                    # 3. ใช้งานฟังก์ชัน
+                    final_report['Status'] = final_report.apply(calc_sales_status, axis=1)
                     
                     if not df_sale_range.empty:
                          pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
