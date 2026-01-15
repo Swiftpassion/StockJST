@@ -1865,7 +1865,10 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         with c_m: st.selectbox("เดือน", thai_months, index=today.month-1, key="m_m", on_change=update_m_dates)
         with c_s: st.date_input("วันที่เริ่มต้น", key="m_d_start")
         with c_e: st.date_input("วันที่สิ้นสุด", key="m_d_end")
+        
         st.divider()
+        
+        # --- ส่วน Focus Date (คงไว้เหมือนเดิม) ---
         col_sec_check, col_sec_date = st.columns([2, 2])
         with col_sec_check:
             st.write("") 
@@ -1873,17 +1876,35 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         focus_date = None
         if use_focus_date:
             with col_sec_date: focus_date = st.date_input("ระบุวันที่ขาย (Focus Date):", value=today, key="filter_focus_date")
+        
         st.divider()
-        col_cat, col_sku = st.columns([1.5, 3])
+
+        # --- ส่วน Category / Movement / SKU (แก้ไขใหม่ตรงนี้) ---
+        # ปรับแบ่งคอลัมน์เป็น 3 ส่วน: หมวดหมู่ (1.5) | การเคลื่อนไหว (1.5) | รายการสินค้า (3)
+        col_cat, col_move, col_sku = st.columns([1.5, 1.5, 3])
+        
         category_options = ["แสดงทั้งหมด"]
         if not df_master.empty and 'Product_Type' in df_master.columns:
             unique_types = sorted(df_master['Product_Type'].astype(str).unique().tolist())
             category_options += unique_types
+            
         sku_options = []
         if not df_master.empty:
             sku_options = df_master.apply(lambda x: f"{x['Product_ID']} : {x['Product_Name']}", axis=1).tolist()
-        with col_cat: selected_category = st.selectbox("หมวดหมู่สินค้า", category_options, key="filter_category")
-        with col_sku: selected_skus = st.multiselect("รายการที่เลือก (Choose options):", sku_options, key="filter_skus")
+            
+        with col_cat: 
+            selected_category = st.selectbox("หมวดหมู่สินค้า", category_options, key="filter_category")
+            
+        # ✅ เพิ่ม Dropdown Filter การเคลื่อนไหว ตรงนี้
+        with col_move:
+            movement_filter = st.selectbox(
+                "การเคลื่อนไหว", 
+                ["ทั้งหมด", "สินค้าที่มีการเคลื่อนไหว", 'สินค้าที่ "ไม่มี" การเคลื่อนไหว'],
+                key="filter_movement"
+            )
+
+        with col_sku: 
+            selected_skus = st.multiselect("รายการที่เลือก (Choose options):", sku_options, key="filter_skus")
 
     start_date = st.session_state.m_d_start
     end_date = st.session_state.m_d_end
@@ -1927,6 +1948,17 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 if final_report.empty: st.warning(f"⚠️ ไม่พบข้อมูลสินค้า")
                 else:
                     final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
+                    
+                    # =========================================================
+                    # ✅ เพิ่ม LOGIC: กรองสินค้าตามการเคลื่อนไหว
+                    # =========================================================
+                    if movement_filter == "สินค้าที่มีการเคลื่อนไหว":
+                        # เลือกเฉพาะที่ยอดขายรวม > 0
+                        final_report = final_report[final_report['Total_Sales_Range'] > 0]
+                        
+                    elif movement_filter == 'สินค้าที่ "ไม่มี" การเคลื่อนไหว':
+                        # เลือกเฉพาะที่ยอดขายรวม == 0
+                        final_report = final_report[final_report['Total_Sales_Range'] == 0]
                     
                     # 1. โหลดข้อมูลจากไฟล์ JST
                     df_real_stock = get_actual_stock_from_folder()
