@@ -1946,7 +1946,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         final_report['Current_Stock'] = final_report['Product_ID'].apply(lambda x: stock_map.get(x, 0) - recent_sales_map.get(x, 0))
 
                     final_report['Current_Stock'] = pd.to_numeric(final_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
-                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ต่ำ" if x<10 else "🟢 ปกติ"))
+                    final_report['Status'] = final_report['Current_Stock'].apply(lambda x: "🔴 หมด" if x<=0 else ("⚠️ ใกล้หมด" if x<10 else "🟢 ปกติ"))
                     
                     if not df_sale_range.empty:
                          pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
@@ -2003,10 +2003,9 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     
                     curr_token = st.query_params.get("token", "")
                     
-                    html_table = """
-                    <div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr>
-                        <th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>
-                    """
+                    # ✅ แก้ไข: เขียน HTML ให้ชิดซ้าย หรือต่อกันเป็นบรรทัดเดียว เพื่อไม่ให้ Streamlit มองเป็น Code Block
+                    html_table = """<div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr>
+<th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>"""
                     for day_col in sorted_day_cols: 
                         html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
