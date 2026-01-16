@@ -898,10 +898,6 @@ def show_history_dialog(fixed_product_id=None):
 def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
     selected_row, row_index = None, None
     po_map = {}
-    po_map_key = {}@st.dialog("📝 บันทึกรับของ / แก้ไข PO", width="large")
-def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
-    selected_row, row_index = None, None
-    po_map = {}
     po_map_key = {}
     
     # --- 1. เตรียมข้อมูลสำหรับค้นหา ---
@@ -2199,7 +2195,7 @@ if "edit_po" in st.query_params and "edit_pid" in st.query_params:
     # บันทึกข้อมูลเป้าหมาย และบังคับเปลี่ยนหน้า
     st.session_state.target_edit_data = {"po": p_po, "pid": p_pid}
     st.session_state.active_dialog = "po_edit_direct"
-    st.session_state.current_page = "📝 รายการสั่งซื้อ" # <--- บรรทัดสำคัญ: บังคับให้เป็นหน้านี้
+    st.session_state.current_page = "📝 รายการสั่งซื้อ" 
     st.rerun()
 if "delete_idx" in st.query_params:
     d_idx = st.query_params["delete_idx"]
