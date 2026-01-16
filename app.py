@@ -594,18 +594,10 @@ def update_master_limits(df_edited):
         sh = gc.open_by_key(MASTER_SHEET_ID)
         ws = sh.worksheet(TAB_NAME_STOCK)
         
-        # 1. เตรียม Header
         headers = ws.row_values(1)
-        target_col_name = "Min_Limit"
-        
-        if target_col_name not in headers:
-            ws.update_cell(1, len(headers) + 1, target_col_name)
-            headers = ws.row_values(1) # อัปเดต header ใหม่
-            col_index = len(headers)
-        else:
-            col_index = headers.index(target_col_name) + 1
-            
-        # หา Index รหัสสินค้า
+        all_rows = ws.get_all_values()
+
+        # หา Index รหัสสินค้า (Product_ID)
         pid_idx = -1
         for i, h in enumerate(headers):
             if h in ['รหัสสินค้า', 'รหัส', 'ID', 'Product_ID']:
@@ -616,52 +608,64 @@ def update_master_limits(df_edited):
             st.error("❌ ไม่พบคอลัมน์ Product_ID ใน Google Sheet")
             return
 
-        # 2. แปลงข้อมูลจากหน้าเว็บ เป็น Dictionary (Clean Data 100%)
-        # สำคัญ: ต้องแปลง Numpy Int เป็น Python Int ไม่งั้น Gspread Error
-        limit_map = {}
-        for index, row in df_edited.iterrows():
-            pid = str(row['Product_ID']).strip()
-            raw_val = row.get('Min_Limit', 0)
-            
-            try:
-                # แปลงเป็น String ก่อน แล้วค่อยแปลงเป็น Int เพื่อล้าง format แปลกๆ
-                clean_val = int(float(str(raw_val).replace(',', '').strip()))
-            except:
-                clean_val = 0
-            
-            limit_map[pid] = clean_val
+        # กำหนดคอลัมน์ที่จะอัปเดต: (ชื่อใน DF, ชื่อใน Sheet, ประเภทข้อมูล)
+        targets = [
+            ("Min_Limit", "Min_Limit", int),
+            ("Note", "Note", str)
+        ]
 
-        # 3. เตรียมข้อมูลลง Sheet
-        all_rows = ws.get_all_values()
-        values_to_update = []
-        
-        # Loop แถวใน Sheet เพื่อให้ลำดับตรงเป๊ะ
-        for row in all_rows[1:]: # ข้าม Header
-            row_pid = str(row[pid_idx]).strip() if len(row) > pid_idx else ""
-            
-            # ค่าใหม่ที่จะใส่
-            final_val = 0 
-            
-            if row_pid in limit_map:
-                final_val = limit_map[row_pid] # ใช้ค่าจากหน้าเว็บ
+        for df_col, sheet_header, dtype in targets:
+            # 1. ตรวจสอบ/สร้าง Header ใน Sheet ถ้ายังไม่มี
+            if sheet_header not in headers:
+                ws.update_cell(1, len(headers) + 1, sheet_header)
+                headers = ws.row_values(1) # โหลด Header ใหม่
+                col_index = len(headers)
             else:
-                # ถ้าไม่มีในหน้าเว็บ ให้เอาค่าเดิมใน Sheet
-                if len(row) >= col_index:
-                    try:
-                        final_val = int(float(str(row[col_index-1]).replace(",", "")))
-                    except:
-                        final_val = 0
-            
-            # เก็บใส่ List (ต้องเป็น Python list of lists)
-            values_to_update.append([final_val])
+                col_index = headers.index(sheet_header) + 1
 
-        # 4. บันทึกจริง
-        if values_to_update:
-            range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
-            ws.update(range_name, values_to_update)
-            st.toast("✅ บันทึกจุดเตือนสำเร็จ!", icon="💾")
-            st.cache_data.clear()
-            time.sleep(1) # รอแป๊บนึงให้ Google Sheet ประมวลผล
+            # 2. เตรียมข้อมูลจากหน้าเว็บ (df_edited) ใส่ Dictionary
+            data_map = {}
+            for index, row in df_edited.iterrows():
+                pid = str(row['Product_ID']).strip()
+                raw_val = row.get(df_col, "")
+                
+                if dtype == int:
+                    try: clean_val = int(float(str(raw_val).replace(',', '').strip()))
+                    except: clean_val = 0
+                else:
+                    clean_val = str(raw_val) if pd.notna(raw_val) else ""
+                
+                data_map[pid] = clean_val
+
+            # 3. เตรียมข้อมูลสำหรับ Update (เทียบกับแถวเดิมใน Sheet)
+            values_to_update = []
+            for row in all_rows[1:]: # ข้าม Header
+                row_pid = str(row[pid_idx]).strip() if len(row) > pid_idx else ""
+                final_val = "" if dtype == str else 0
+                
+                # ถ้าเป็นสินค้าที่ถูกแก้ในหน้าเว็บ -> ใช้ค่าใหม่
+                if row_pid in data_map:
+                    final_val = data_map[row_pid]
+                else:
+                    # ถ้าไม่ได้แก้ (เช่น ติด Filter อยู่) -> ให้คงค่าเดิมใน Sheet ไว้
+                    if len(row) >= col_index:
+                        curr_val = row[col_index-1]
+                        if dtype == int:
+                            try: final_val = int(float(str(curr_val).replace(",", "")))
+                            except: final_val = 0
+                        else:
+                            final_val = str(curr_val)
+                
+                values_to_update.append([final_val])
+
+            # 4. บันทึกลง Sheet (Batch Update)
+            if values_to_update:
+                range_name = f"{gspread.utils.rowcol_to_a1(2, col_index)}:{gspread.utils.rowcol_to_a1(len(values_to_update)+1, col_index)}"
+                ws.update(range_name, values_to_update)
+
+        st.toast("✅ บันทึกข้อมูล (จุดเตือน & หมายเหตุ) สำเร็จ!", icon="💾")
+        st.cache_data.clear()
+        time.sleep(1)
             
     except Exception as e:
         st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
@@ -2505,7 +2509,7 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
             edit_df = edit_df[edit_df['Product_Name'].str.contains(search_text, case=False) | edit_df['Product_ID'].str.contains(search_text, case=False)]
 
         # 1. จัดการคอลัมน์ให้ครบ (เอา Source, Recent_Sold, PO_Number ออกแล้ว)
-        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Status", "Min_Limit"]
+        final_cols = ["Product_ID", "Image", "Product_Name", "Current_Stock", "Status", "Min_Limit", "Note"]
         
         for c in final_cols:
             if c not in edit_df.columns: edit_df[c] = "" 
@@ -2536,7 +2540,7 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
                 st.rerun()
 
         # -------------------------------------------------------
-        # 📉 ตารางแสดงผล (Clean Version)
+        # 📉 ตารางแสดงผล (Update config)
         # -------------------------------------------------------
         st.data_editor(
             edit_df[final_cols],
@@ -2548,6 +2552,8 @@ elif st.session_state.current_page == "📈 รายงาน Stock":
                 "Status": st.column_config.TextColumn("สถานะ", disabled=True),
                 # Min_Limit แก้ไขได้
                 "Min_Limit": st.column_config.NumberColumn("🔔 จุดเตือน (แก้ไขได้)", min_value=0, step=1, required=True),
+                # Note แก้ไขได้ (เพิ่มใหม่)
+                "Note": st.column_config.TextColumn("📝 หมายเหตุ", required=False, width="medium"),
             },
             height=1500,  
             use_container_width=True, 
