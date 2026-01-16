@@ -266,7 +266,10 @@ def get_stock_from_sheet():
             'จำนวนน้อยสุดในการเติมสินค้า (MIN)': 'Min_Limit', # <--- อัปเดตใหม่
             
             # --- 6. หมวดหมู่ (Type) ---
-            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type'
+            'Type': 'Product_Type', 'หมวดหมู่': 'Product_Type', 'Category': 'Product_Type', 'กลุ่ม': 'Product_Type',
+
+            # --- 7. (ใหม่) หมายเหตุ ---
+            'หมายเหตุ': 'Note', 'Note': 'Note', 'Remark': 'Note', 'Remarks': 'Note'
         }
         
         # เปลี่ยนชื่อคอลัมน์ตาม Map ที่ตั้งไว้
@@ -277,6 +280,7 @@ def get_stock_from_sheet():
         if 'Product_ID' not in df.columns: df['Product_ID'] = "Unknown"
         if 'Product_Name' not in df.columns: df['Product_Name'] = df['Product_ID']
         if 'Product_Type' not in df.columns: df['Product_Type'] = "ทั่วไป"
+        if 'Note' not in df.columns: df['Note'] = ""
         
         # แปลงข้อมูลตัวเลขให้ถูกต้อง
         df['Initial_Stock'] = pd.to_numeric(df['Initial_Stock'], errors='coerce').fillna(0).astype(int)
