@@ -910,7 +910,7 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
     
     # --- 1. เตรียมข้อมูลสำหรับค้นหา (สร้าง Key เป็น String เพื่อความชัวร์) ---
     if not df_po.empty:
-        # สร้างคอลัมน์ช่วยค้นหา (Helper Columns)
+        # สร้างคอลัมน์ช่วยค้นหา (Helper Columns) - แปลงเป็น String ทั้งหมดป้องกัน Error
         df_po['PO_Str'] = df_po['PO_Number'].astype(str).str.strip()
         df_po['PID_Str'] = df_po['Product_ID'].astype(str).str.strip()
         
@@ -919,10 +919,14 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
             recv_date = str(row.get('Received_Date', '')).strip()
             is_received = (recv_date != '' and recv_date.lower() != 'nat')
             status_icon = "✅ รับแล้ว" if is_received else ("✅ ครบ/ปิด" if qty_ord <= 0 else "⏳ รอของ")
-            display_text = f"[{status_icon}] {row.get('PO_Number','-')} : {row.get('Product_ID','-')} (สั่ง: {qty_ord})"
+            
+            # Display Text
+            po_val = str(row.get('PO_Number','-'))
+            pid_val = str(row.get('Product_ID','-'))
+            display_text = f"[{status_icon}] {po_val} : {pid_val} (สั่ง: {qty_ord})"
             
             po_map[display_text] = row
-            key_id = (str(row.get('PO_Number', '')).strip(), str(row.get('Product_ID', '')).strip())
+            key_id = (po_val.strip(), pid_val.strip())
             po_map_key[key_id] = row
 
     # --- 2. Logic การเลือกรายการ ---
@@ -948,18 +952,21 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
     if selected_row is not None and row_index is not None:
         def get_val(col, default): return selected_row.get(col, default)
         
-        # ดึงค่าตั้งต้น
+        # ดึงค่าตั้งต้น (แปลงเป็น String ให้ชัวร์)
         pid_current = str(get_val('Product_ID', '')).strip()
         po_current_num = str(get_val('PO_Number', '')).strip()
         pname = get_val('Product_Name', '')
         old_qty = int(get_val('Qty_Ordered', 1))
+        current_sheet_idx = int(row_index)
         
         # แสดงหัวข้อสินค้า
         with st.container(border=True):
             c_img, c_detail = st.columns([1, 4])
             img_url = get_val('Image', '')
             if not df_master.empty:
-                m_row = df_master[df_master['Product_ID'].astype(str).str.strip() == pid_current]
+                # แปลงเป็น String ก่อนค้นหาใน Master
+                df_master['PID_Str'] = df_master['Product_ID'].astype(str).str.strip()
+                m_row = df_master[df_master['PID_Str'] == pid_current]
                 if not m_row.empty: 
                     img_url = m_row.iloc[0].get('Image', img_url)
                     pname = m_row.iloc[0].get('Product_Name', pname)
@@ -968,24 +975,31 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
             c_detail.write(f"**{pname}**")
 
         # =========================================================
-        # 🔥 SECTION 0: ประวัติการรับของ (History) - แก้ไขใหม่
+        # 🔥 SECTION 0: ประวัติการรับของ (History) - FIXED CODE
         # =========================================================
-        # กรองข้อมูลจาก df_po โดยตรง เพื่อหาประวัติของ PO และ สินค้านี้
-        history_rows = df_po[
-            (df_po['PO_Str'] == po_current_num) &       # เลข PO เดียวกัน
-            (df_po['PID_Str'] == pid_current) &       # สินค้าตัวเดียวกัน
-            (df_po['Sheet_Row_Index'] != row_index) & # ไม่ใช่แถวปัจจุบันที่กำลังแก้
-            (df_po['Qty_Received'] > 0)               # ต้องเป็นแถวที่รับของแล้ว
+        # ใช้ df_po ตัว Global และสร้างคอลัมน์เทียบ String ให้ชัดเจน
+        df_hist_check = df_po.copy()
+        df_hist_check['PO_Str_Check'] = df_hist_check['PO_Number'].astype(str).str.strip()
+        df_hist_check['PID_Str_Check'] = df_hist_check['Product_ID'].astype(str).str.strip()
+        df_hist_check['Qty_Received'] = pd.to_numeric(df_hist_check['Qty_Received'], errors='coerce').fillna(0)
+
+        history_rows = df_hist_check[
+            (df_hist_check['PO_Str_Check'] == po_current_num) &    # เลข PO ตรงกัน (String)
+            (df_hist_check['PID_Str_Check'] == pid_current) &      # รหัสสินค้าตรงกัน (String)
+            (df_hist_check['Sheet_Row_Index'] != current_sheet_idx) & # ไม่ใช่บรรทัดปัจจุบัน
+            (df_hist_check['Qty_Received'] > 0)                    # ต้องมียอดรับแล้ว
         ].copy()
 
         if not history_rows.empty:
-            st.markdown("##### 📜 ประวัติการรับของ (History)")
+            st.markdown("#### 📜 ประวัติการรับของ (History)")
+            st.caption(f"ประวัติการรับของก่อนหน้าของ {pid_current} ใน PO: {po_current_num}")
+            
             hist_data = []
             # เรียงตามวันที่รับของ
             history_rows = history_rows.sort_values(by='Received_Date')
             
             for i, (_, h_row) in enumerate(history_rows.iterrows(), 1):
-                # จัดการวันที่ให้สวยงาม
+                # Format Date
                 d_val = h_row.get('Received_Date', '-')
                 d_show = "-"
                 if pd.notna(d_val) and str(d_val).lower() != 'nat' and str(d_val).strip() != "":
@@ -996,26 +1010,29 @@ def po_edit_dialog_v2(pre_selected_po=None, pre_selected_pid=None):
                     "รอบที่": f"รอบที่ {i}",
                     "จำนวนที่ได้รับ": int(h_row.get('Qty_Received', 0)),
                     "วันที่ได้รับของ": d_show,
-                    "คิวที่ได้รับรอบนี้ (CBM)": float(h_row.get('CBM', 0)),
-                    "น้ำหนักที่ได้รับรอบนี้ (KG)": float(h_row.get('Transport_Weight', 0))
+                    "คิวที่ได้รับรอบนี้": float(h_row.get('CBM', 0)),
+                    "น้ำหนักที่ได้รับรอบนี้": float(h_row.get('Transport_Weight', 0))
                 })
             
-            # สร้างตารางและกำหนด format ตัวเลข
+            # สร้าง DataFrame สำหรับแสดงผล
             hist_df = pd.DataFrame(hist_data)
+            
             st.dataframe(
                 hist_df, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
-                    "คิวที่ได้รับรอบนี้ (CBM)": st.column_config.NumberColumn(format="%.4f"),
-                    "น้ำหนักที่ได้รับรอบนี้ (KG)": st.column_config.NumberColumn(format="%.2f"),
-                    "จำนวนที่ได้รับ": st.column_config.NumberColumn(format="%d"),
+                    "รอบที่": st.column_config.TextColumn("รอบที่", width="small"),
+                    "จำนวนที่ได้รับ": st.column_config.NumberColumn("จำนวนที่ได้รับ", format="%d"),
+                    "วันที่ได้รับของ": st.column_config.TextColumn("วันที่ได้รับของ"),
+                    "คิวที่ได้รับรอบนี้": st.column_config.NumberColumn("คิวที่ได้รับรอบนี้ (CBM)", format="%.4f"),
+                    "น้ำหนักที่ได้รับรอบนี้": st.column_config.NumberColumn("น้ำหนักที่ได้รับรอบนี้ (KG)", format="%.2f"),
                 }
             )
             st.divider()
         else:
-            # กรณีไม่มีประวัติ ให้แสดงข้อความแจ้ง (Optional)
-            st.info("ℹ️ ยังไม่มีประวัติการรับของก่อนหน้านี้")
+            # แจ้งเตือนถ้าไม่มีประวัติ (จะได้รู้ว่าโค้ดทำงานแต่แค่ไม่เจอข้อมูล)
+            st.info("ℹ️ ยังไม่มีประวัติการแบ่งรับของก่อนหน้านี้")
             st.divider()
 
         with st.form(key="full_edit_po_form"):
