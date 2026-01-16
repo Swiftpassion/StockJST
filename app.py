@@ -1283,6 +1283,20 @@ def delete_confirm_dialog():
         st.rerun()
 @st.dialog("📝 บันทึกข้อมูลการสั่งซื้อ (Batch PO)", width="large")
 def po_batch_dialog():
+    # --- Function: คำนวณวันที่คาดการณ์อัตโนมัติ ---
+    def auto_update_batch_date():
+        t_type = st.session_state.get("bp_trans")
+        o_date = st.session_state.get("bp_ord_date")
+        
+        if t_type and o_date:
+            days_add = 0
+            if t_type == "ทางรถ": days_add = 14
+            elif t_type == "ทางเรือ": days_add = 25
+            
+            # อัปเดตวันที่คาดการณ์ลงใน Session State
+            if days_add > 0:
+                st.session_state.bp_expected_date = o_date + timedelta(days=days_add)
+
     # --- Reset Logic ---
     if st.session_state.get("need_reset_inputs", False):
         keys_to_reset = ["bp_sel_prod", "bp_qty", "bp_total_yuan", "bp_note", 
@@ -1291,22 +1305,37 @@ def po_batch_dialog():
         for key in keys_to_reset:
             if key in st.session_state: del st.session_state[key]
         st.session_state["need_reset_inputs"] = False
+        
+        # Reset เสร็จแล้วให้คำนวณวันที่ใหม่ทันที (ใช้ค่า Default ปัจจุบัน)
+        # แต่ต้องระวัง key error ถ้ายังไม่ได้ render widget, ดังนั้นข้ามไปก่อนในรอบ reset
+        pass
 
     # --- 1. Header Section ---
     with st.container(border=True):
         st.subheader("1. ข้อมูลเอกสาร (Header)")
         c1, c2, c3 = st.columns(3)
         po_number = c1.text_input("เลข PO", placeholder="XXXXX", key="bp_po_num")
-        transport_type = c2.selectbox("การขนส่ง", ["ทางรถ", "ทางเรือ"], key="bp_trans")
-        order_date = c3.date_input("วันที่สั่งซื้อ", date.today(), key="bp_ord_date")
         
-        # Auto Calculate Expected Date
-        expected_date_val = None
-        if transport_type == "ทางรถ": expected_date_val = order_date + timedelta(days=14)
-        elif transport_type == "ทางเรือ": expected_date_val = order_date + timedelta(days=25)
+        # ✅ เพิ่ม on_change
+        transport_type = c2.selectbox(
+            "การขนส่ง", 
+            ["ทางรถ", "ทางเรือ"], 
+            key="bp_trans",
+            on_change=auto_update_batch_date 
+        )
         
+        # ✅ เพิ่ม on_change
+        order_date = c3.date_input(
+            "วันที่สั่งซื้อ", 
+            date.today(), 
+            key="bp_ord_date",
+            on_change=auto_update_batch_date
+        )
+        
+        # Set Default ครั้งแรก ถ้ายังไม่มีค่าใน Session
         if "bp_expected_date" not in st.session_state:
-            st.session_state.bp_expected_date = expected_date_val
+            # คำนวณเบื้องต้น (Default ทางรถ 14 วัน)
+            st.session_state.bp_expected_date = date.today() + timedelta(days=14)
 
     # --- 2. Item Form Section ---
     with st.container(border=True):
@@ -1333,7 +1362,10 @@ def po_batch_dialog():
             with col_data:
                 st.markdown('<span style="color:#2ecc71; font-weight:bold;">(กรอกตอนสั่งซื้อ)</span>', unsafe_allow_html=True)
                 r1_c1, r1_c2, r1_c3 = st.columns(3)
+                
+                # key="bp_expected_date" จะถูกอัปเดตอัตโนมัติจาก on_change ด้านบน
                 expected_date = r1_c1.date_input("วันที่คาดว่าจะได้รับ", key="bp_expected_date")
+                
                 qty = r1_c2.number_input("จำนวนสั่งซื้อ (ชิ้น)", min_value=1, value=None, placeholder="XXXXX", key="bp_qty")
                 recv_date = r1_c3.date_input("วันที่ได้รับ (ถ้าได้เลย)", value=None, key="bp_recv_date")
                 
