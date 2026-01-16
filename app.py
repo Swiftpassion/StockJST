@@ -2059,8 +2059,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     curr_token = st.query_params.get("token", "")
                     
                     # ✅ แก้ไข: เขียน HTML ให้ชิดซ้าย หรือต่อกันเป็นบรรทัดเดียว เพื่อไม่ให้ Streamlit มองเป็น Code Block
-                    html_table = """<div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr>
-<th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>"""
+                    html_table = """<div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr><th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>"""
                     for day_col in sorted_day_cols: 
                         html_table += f'<th class="col-small">{day_col}</th>'
                     html_table += "</tr></thead><tbody>"
