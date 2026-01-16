@@ -2250,36 +2250,8 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             .status-badge { padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; display: inline-block; width: 120px;}
         </style>
         """, unsafe_allow_html=True)
-
-        table_html = """
-        <div class="po-table-container"><table class="custom-po-table"><thead><tr>
-            <th style="width:50px;">แก้ไข</th>
-            <th>รหัสสินค้า</th>
-            <th>รูปสินค้า</th>
-            <th>สถานะ</th>
-            <th>เลข PO</th>
-            <th>ประเภทการนำเข้า</th>
-            <th style="background-color: #5f00bf;">วันที่สั่งซื้อ</th>
-            <th style="background-color: #5f00bf;">วันคาดการณ์</th>
-            <th style="background-color: #5f00bf;">วันที่ได้รับ</th>
-            <th style="background-color: #5f00bf;">ระยะเวลา</th>
-            <th style="background-color: #5f00bf;">จำนวนที่ได้รับ</th>
-            <th style="background-color: #00bf00;">จำนวนสั่งซื้อ</th>
-            <th style="background-color: #00bf00;">ต้นทุน/ชิ้น (฿)</th>
-            <th>ยอดเงินหยวน (¥)</th>
-            <th>ยอดเงินบาทที่ใช้ (฿)</th>
-            <th>เรทเงิน</th>
-            <th>เรทค่าขนส่ง</th>
-            <th>ขนาด (คิว)</th>
-            <th>ค่าส่ง</th>
-            <th>น้ำหนัก / KG</th>
-            <th>ราคา / ชิ้น (หยวน)</th>
-            <th style="background-color: #ff6600;">SHOPEE</th>
-            <th>LAZADA</th>
-            <th style="background-color: #000000;">TIKTOK</th>
-            <th>หมายเหตุ</th>
-            <th>ร้านค้า</th>
-        </tr></thead><tbody>"""
+    
+        table_html = """<div class="po-table-container"><table class="custom-po-table"><thead><tr><th style="width:50px;">แก้ไข</th><th>รหัสสินค้า</th><th>รูปสินค้า</th><th>สถานะ</th><th>เลข PO</th><th>ประเภทการนำเข้า</th><th style="background-color: #5f00bf;">วันที่สั่งซื้อ</th><th style="background-color: #5f00bf;">วันคาดการณ์</th><th style="background-color: #5f00bf;">วันที่ได้รับ</th><th style="background-color: #5f00bf;">ระยะเวลา</th><th style="background-color: #5f00bf;">จำนวนที่ได้รับ</th><th style="background-color: #00bf00;">จำนวนสั่งซื้อ</th><th style="background-color: #00bf00;">ต้นทุน/ชิ้น (฿)</th><th>ยอดเงินหยวน (¥)</th><th>ยอดเงินบาทที่ใช้ (฿)</th><th>เรทเงิน</th><th>เรทค่าขนส่ง</th><th>ขนาด (คิว)</th><th>ค่าส่ง</th><th>น้ำหนัก / KG</th><th>ราคา / ชิ้น (หยวน)</th><th style="background-color: #ff6600;">SHOPEE</th><th>LAZADA</th><th style="background-color: #000000;">TIKTOK</th><th>หมายเหตุ</th><th>ร้านค้า</th></tr></thead><tbody>"""
 
         def fmt_date(d): return d.strftime("%d/%m/%Y") if pd.notna(d) and str(d) != 'NaT' else "-"
         def fmt_num(val, dec=2): 
