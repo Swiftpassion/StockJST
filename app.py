@@ -2314,8 +2314,6 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
 
                     # แปลง " เป็น &quot; เพื่อไม่ให้ HTML Error
                     full_pname = str(row.get("Product_Name", "")).replace('"', '&quot;')
-                    # ใส่ title="{full_pname}" เพื่อให้เมาส์ชี้แล้วขึ้นชื่อเต็ม
-                    # ใส่ style max-width และ text-overflow: ellipsis เพื่อให้ถ้าชื่อยาวมากจะขึ้น ... แทนที่จะดันตารางจนเละ
                     table_html += f'<td rowspan="{row_count}" class="td-merged" title="{full_pname}">'
                     table_html += f'<b>{row["Product_ID"]}</b><br>'
                     table_html += f'<div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin: 0 auto; font-size: 12px;">{full_pname}</div>'
@@ -2384,7 +2382,12 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     
                     final_store_html = "".join(icons_html) if icons_html else "-"
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
+                
+                # ✅ [สำคัญ] ปิด Row ที่บรรทัดนี้
+                table_html += '</tr>'
 
+        # ✅ [สำคัญ] ปิด Table ก่อน render
+        table_html += "</tbody></table></div>"
         st.markdown(table_html, unsafe_allow_html=True)
     else: st.info("ยังไม่มีข้อมูล PO")
 
