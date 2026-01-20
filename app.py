@@ -2402,14 +2402,10 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                 if idx == 0:
                     curr_token = st.query_params.get("token", "")
                     ts = int(time.time() * 1000)
-                    
-                    # Encode URL
                     safe_pid_edit = urllib.parse.quote(str(row['Product_ID']).strip())
                     safe_po_edit = urllib.parse.quote(str(row['PO_Number']).strip())
-                    
                     edit_link = f"?edit_po={safe_po_edit}&edit_pid={safe_pid_edit}&t={ts}&token={curr_token}"
                     edit_btn_html = f"""<a href="{edit_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ffc107; cursor:pointer; margin-right: 8px;" title="แก้ไข">✏️</a>"""
-                    
                     row_idx_to_delete = row.get("Sheet_Row_Index", 0)
                     delete_link = f"?delete_idx={row_idx_to_delete}&del_po={safe_po_edit}&token={curr_token}"
                     delete_btn_html = f"""<a href="{delete_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ff4b4b; cursor:pointer;" title="ลบรายการ">🗑️</a>"""
