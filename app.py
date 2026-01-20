@@ -1944,15 +1944,17 @@ thai_months = ["มกราคม", "กุมภาพันธ์", "มี�
 today = date.today()
 all_years = [today.year - i for i in range(3)]
 
-# --- Page 2: Daily Sales Summary (แก้ไข CSS ให้ตารางยาวเต็มจอ) ---
+# --- Page 1: Daily Sales Summary ---
 if st.session_state.current_page == "📅 สรุปยอดขายรายวัน":
     st.subheader("📅 สรุปยอดขายรายวัน")
     
+    # ตรวจสอบว่ามีการกดดูประวัติจากหน้าอื่นหรือไม่
     if "history_pid" in st.query_params:
         hist_pid = st.query_params["history_pid"]
         del st.query_params["history_pid"] 
         show_history_dialog(fixed_product_id=hist_pid)
 
+    # ฟังก์ชันอัปเดตวันที่เมื่อเปลี่ยนเดือน/ปี
     def update_m_dates():
         y = st.session_state.m_y
         m_index = thai_months.index(st.session_state.m_m) + 1
@@ -1960,12 +1962,13 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         st.session_state.m_d_start = date(y, m_index, 1)
         st.session_state.m_d_end = date(y, m_index, last_day)
 
+    # ตั้งค่า Default Date
     if "m_d_start" not in st.session_state: st.session_state.m_d_start = date(today.year, today.month, 1)
     if "m_d_end" not in st.session_state:
         _, last_day = calendar.monthrange(today.year, today.month)
         st.session_state.m_d_end = date(today.year, today.month, last_day)
 
-    # --- ส่วน UI Filter ---
+    # --- ส่วน UI Filter (ตัวกรอง) ---
     with st.container(border=True):
         st.markdown("##### 🔍 ตัวกรองข้อมูล")
         c_y, c_m, c_s, c_e = st.columns([1, 1.5, 1.5, 1.5])
@@ -1976,7 +1979,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         
         st.divider()
         
-        # --- ส่วน Focus Date (คงไว้เหมือนเดิม) ---
+        # --- ส่วน Focus Date ---
         col_sec_check, col_sec_date = st.columns([2, 2])
         with col_sec_check:
             st.write("") 
@@ -1987,8 +1990,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         
         st.divider()
 
-        # --- ส่วน Category / Movement / SKU (แก้ไขใหม่ตรงนี้) ---
-        # ปรับแบ่งคอลัมน์เป็น 3 ส่วน: หมวดหมู่ (1.5) | การเคลื่อนไหว (1.5) | รายการสินค้า (3)
+        # --- ส่วน Category / Movement / SKU ---
         col_cat, col_move, col_sku = st.columns([1.5, 1.5, 3])
         
         category_options = ["แสดงทั้งหมด"]
@@ -2003,7 +2005,6 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         with col_cat: 
             selected_category = st.selectbox("หมวดหมู่สินค้า", category_options, key="filter_category")
             
-        # ✅ เพิ่ม Dropdown Filter การเคลื่อนไหว ตรงนี้
         with col_move:
             movement_filter = st.selectbox(
                 "การเคลื่อนไหว", 
@@ -2014,36 +2015,47 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         with col_sku: 
             selected_skus = st.multiselect("รายการที่เลือก (Choose options):", sku_options, key="filter_skus")
 
+    # --- เริ่มประมวลผลข้อมูล ---
     start_date = st.session_state.m_d_start
     end_date = st.session_state.m_d_end
     
     if start_date and end_date:
         if start_date > end_date: st.error("⚠️ วันที่เริ่มต้นต้องมาก่อนวันที่สิ้นสุด")
         else:
+            # 1. กรองข้อมูลการขายตามวันที่
             if not df_sale.empty and 'Date_Only' in df_sale.columns:
                 mask_range = (df_sale['Date_Only'] >= start_date) & (df_sale['Date_Only'] <= end_date)
                 df_sale_range = df_sale.loc[mask_range].copy()
+                
                 df_pivot = pd.DataFrame()
                 if not df_sale_range.empty:
                     thai_abbr = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
                     df_sale_range['Day_Col'] = df_sale_range['Order_Time'].apply(lambda x: f"{x.day} {thai_abbr[x.month]}")
                     df_sale_range['Day_Sort'] = df_sale_range['Order_Time'].dt.strftime('%Y%m%d')
+                    
+                    # Pivot Table: แปลงแถวเป็นคอลัมน์วันที่
                     pivot_data = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                     df_pivot = pivot_data.pivot(index='Product_ID', columns='Day_Col', values='Qty_Sold').fillna(0).astype(int)
+                    
+                    # กรอง Focus Date
                     if use_focus_date and focus_date:
                         products_sold_on_focus = df_sale[(df_sale['Date_Only'] == focus_date) & (df_sale['Qty_Sold'] > 0)]['Product_ID'].unique()
                         df_pivot = df_pivot[df_pivot.index.isin(products_sold_on_focus)]
 
+                # Merge กับ Master
                 if not df_pivot.empty:
                     df_pivot = df_pivot.reset_index()
                     final_report = pd.merge(df_master, df_pivot, on='Product_ID', how='left')
-                else: final_report = df_master.copy()
+                else: 
+                    final_report = df_master.copy()
                 
+                # หาคอลัมน์วันที่ทั้งหมด
                 day_cols = [c for c in final_report.columns if c not in df_master.columns]
                 day_cols = [c for c in day_cols if isinstance(c, str) and "🔴" not in c and "หมด" not in c]
 
                 final_report[day_cols] = final_report[day_cols].fillna(0).astype(int)
                 
+                # Apply Filters
                 if selected_category != "แสดงทั้งหมด": final_report = final_report[final_report['Product_Type'] == selected_category]
                 if selected_skus:
                     selected_ids = [item.split(" : ")[0] for item in selected_skus]
@@ -2057,21 +2069,15 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                 else:
                     final_report['Total_Sales_Range'] = final_report[day_cols].sum(axis=1).astype(int)
                     
-                    # =========================================================
-                    # ✅ เพิ่ม LOGIC: กรองสินค้าตามการเคลื่อนไหว
-                    # =========================================================
+                    # Logic: กรองสินค้าตามการเคลื่อนไหว
                     if movement_filter == "สินค้าที่มีการเคลื่อนไหว":
-                        # เลือกเฉพาะที่ยอดขายรวม > 0
                         final_report = final_report[final_report['Total_Sales_Range'] > 0]
-                        
                     elif movement_filter == 'สินค้าที่ "ไม่มี" การเคลื่อนไหว':
-                        # เลือกเฉพาะที่ยอดขายรวม == 0
                         final_report = final_report[final_report['Total_Sales_Range'] == 0]
                     
-                    # 1. โหลดข้อมูลจากไฟล์ JST
+                    # 2. คำนวณ Current Stock (Real vs Calculated)
                     df_real_stock = get_actual_stock_from_folder()
                     
-                    # 2. คำนวณ Current Stock
                     if not df_real_stock.empty:
                         real_stock_map = df_real_stock.set_index('Product_ID')['Real_Stock'].to_dict()
                         final_report['Real_Stock_File'] = final_report['Product_ID'].map(real_stock_map)
@@ -2087,30 +2093,20 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
 
                     final_report['Current_Stock'] = pd.to_numeric(final_report['Current_Stock'], errors='coerce').fillna(0).astype(int)
 
-                    # =========================================================
-                    # 🛠️ LOGIC: คำนวณสถานะตาม "จุดเตือน" (แก้ไขให้ตรงกับหน้า Stock)
-                    # =========================================================
-                    
-                    # 1. เตรียมข้อมูล Min_Limit ให้เป็นตัวเลข
-                    if 'Min_Limit' not in final_report.columns:
-                        final_report['Min_Limit'] = 0
+                    # 3. คำนวณสถานะ (Status)
+                    if 'Min_Limit' not in final_report.columns: final_report['Min_Limit'] = 0
                     final_report['Min_Limit'] = pd.to_numeric(final_report['Min_Limit'], errors='coerce').fillna(0).astype(int)
 
-                    # 2. ฟังก์ชันเช็คสถานะ
                     def calc_sales_status(row):
                         curr = row['Current_Stock']
                         limit = row['Min_Limit']
-                        
-                        if curr <= 0:
-                            return "🔴 หมด"
-                        elif curr <= limit: # ✅ ถ้าคงเหลือน้อยกว่าหรือเท่ากับจุดเตือน ให้แจ้งเตือนทันที
-                            return "⚠️ ใกล้หมด"
-                        else:
-                            return "🟢 ปกติ"
+                        if curr <= 0: return "🔴 หมด"
+                        elif curr <= limit: return "⚠️ ใกล้หมด"
+                        else: return "🟢 ปกติ"
 
-                    # 3. ใช้งานฟังก์ชัน
                     final_report['Status'] = final_report.apply(calc_sales_status, axis=1)
                     
+                    # เรียงลำดับคอลัมน์วันที่
                     if not df_sale_range.empty:
                          pivot_data_temp = df_sale_range.groupby(['Product_ID', 'Day_Col', 'Day_Sort'])['Qty_Sold'].sum().reset_index()
                          sorted_day_cols = sorted(day_cols, key=lambda x: pivot_data_temp[pivot_data_temp['Day_Col'] == x]['Day_Sort'].values[0] if x in pivot_data_temp['Day_Col'].values else 0)
@@ -2121,20 +2117,20 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     final_df = final_report[available_fixed + sorted_day_cols]
                     
                     st.divider()
-                    st.markdown(f"**📊 แสดงผล:** ({len(final_df)} รายการ)")
                     
                     # =========================================================
-                    # 🖌️ แก้ไข CSS ให้ตารางยาวเต็มจอและไม่จำกัดความสูง
+                    # 🖌️ CSS Style (กำหนด CSS ครั้งเดียวตรงนี้)
                     # =========================================================
                     st.markdown("""
                     <style>
                         .daily-sales-table-wrapper { 
                             overflow-x: auto; 
                             width: 100%; 
-                            margin-top: 10px; 
+                            margin-top: 5px; 
                             background: #1c1c1c; 
                             border-radius: 8px; 
                             border: 1px solid #444; 
+                            margin-bottom: 20px;
                         }
                         .daily-sales-table { 
                             width: 100%; 
@@ -2162,68 +2158,72 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     </style>
                     """, unsafe_allow_html=True)
                     
+                    st.markdown(f"**📊 แสดงผลทั้งหมด:** {len(final_df):,} รายการ")
                     curr_token = st.query_params.get("token", "")
-                    
-                    # ✅ ใช้วิธี List Append แทน String Concatenation (แก้บัคอักขระต่างดาว)
-                    html_parts = []
-                    html_parts.append('<div class="daily-sales-table-wrapper"><table class="daily-sales-table">')
-                    
-                    # --- Header ---
-                    html_parts.append('<thead><tr>')
-                    html_parts.append('<th class="col-history">ประวัติ</th>')
-                    html_parts.append('<th class="col-small">รหัส</th>')
-                    html_parts.append('<th class="col-image">รูป</th>')
-                    html_parts.append('<th class="col-name">ชื่อสินค้า</th>')
-                    html_parts.append('<th class="col-small">คงเหลือ</th>')
-                    html_parts.append('<th class="col-medium">ยอดรวม</th>')
-                    html_parts.append('<th class="col-medium">สถานะ</th>')
-                    
-                    for day_col in sorted_day_cols: 
-                        html_parts.append(f'<th class="col-small">{day_col}</th>')
-                    html_parts.append('</tr></thead>')
-                    
-                    # --- Body ---
-                    html_parts.append('<tbody>')
-                    
-                    for idx, row in final_df.iterrows():
-                        current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
-        
-                        safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
-                        h_link = f"?history_pid={safe_pid}&token={curr_token}"
-                        
-                        # Clean Text ป้องกัน HTML พัง
-                        raw_name = str(row.get("Product_Name", ""))
-                        clean_name = clean_text_for_html(raw_name)
-                        if len(clean_name) > 50: clean_name = clean_name[:47] + "..."
 
-                        html_parts.append('<tr>')
-                        html_parts.append(f'<td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>')
-                        html_parts.append(f'<td class="col-small">{row["Product_ID"]}</td>')
-                        
-                        if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
-                            html_parts.append(f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>')
-                        else: 
-                            html_parts.append('<td class="col-image"></td>')
-                        
-                        html_parts.append(f'<td class="col-name">{clean_name}</td>')
-                        html_parts.append(f'<td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>')
-                        html_parts.append(f'<td class="col-medium">{row["Total_Sales_Range"]}</td>')
-                        html_parts.append(f'<td class="col-medium">{row["Status"]}</td>')
-                        
-                        for day_col in sorted_day_cols:
-                            day_value = row.get(day_col, 0)
-                            day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
-                            # แปลงค่าเป็น int หากเป็นจำนวนเต็ม เพื่อความสวยงาม
-                            val_show = int(day_value) if isinstance(day_value, (int, float)) else day_value
-                            html_parts.append(f'<td class="col-small {day_class}">{val_show}</td>')
-                        
-                        html_parts.append('</tr>')
-                        
-                    html_parts.append('</tbody></table></div>')
+                    # =========================================================
+                    # 🚀 เทคนิค Batch Rendering: ทยอยวาดทีละ 100 รายการ
+                    # ช่วยให้ Scroll ดูได้หมดในหน้าเดียว และแก้ปัญหาตัวอักษรเพี้ยน
+                    # =========================================================
+                    chunk_size = 100  
                     
-                    # รวม List เป็น String เดียวแล้วแสดงผล (เร็วกว่าและไม่เพี้ยน)
-                    st.markdown("".join(html_parts), unsafe_allow_html=True)
-            else: st.error("⚠️ ไม่พบข้อมูลการขาย")
+                    for start_idx in range(0, len(final_df), chunk_size):
+                        end_idx = start_idx + chunk_size
+                        df_chunk = final_df.iloc[start_idx:end_idx]
+                        
+                        html_parts = []
+                        html_parts.append('<div class="daily-sales-table-wrapper"><table class="daily-sales-table">')
+                        
+                        # สร้าง Header ทุกครั้งเพื่อให้แต่ละก้อนมีหัวตาราง
+                        html_parts.append('<thead><tr>')
+                        html_parts.append('<th class="col-history">ประวัติ</th>')
+                        html_parts.append('<th class="col-small">รหัส</th>')
+                        html_parts.append('<th class="col-image">รูป</th>')
+                        html_parts.append('<th class="col-name">ชื่อสินค้า</th>')
+                        html_parts.append('<th class="col-small">คงเหลือ</th>')
+                        html_parts.append('<th class="col-medium">ยอดรวม</th>')
+                        html_parts.append('<th class="col-medium">สถานะ</th>')
+                        for day_col in sorted_day_cols: 
+                            html_parts.append(f'<th class="col-small">{day_col}</th>')
+                        html_parts.append('</tr></thead>')
+                        
+                        html_parts.append('<tbody>')
+                        for idx, row in df_chunk.iterrows():
+                            current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
+                            safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
+                            h_link = f"?history_pid={safe_pid}&token={curr_token}"
+                            
+                            raw_name = str(row.get("Product_Name", ""))
+                            clean_name = clean_text_for_html(raw_name)
+                            if len(clean_name) > 50: clean_name = clean_name[:47] + "..."
+
+                            html_parts.append('<tr>')
+                            html_parts.append(f'<td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>')
+                            html_parts.append(f'<td class="col-small">{row["Product_ID"]}</td>')
+                            
+                            if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
+                                html_parts.append(f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>')
+                            else: 
+                                html_parts.append('<td class="col-image"></td>')
+                            
+                            html_parts.append(f'<td class="col-name">{clean_name}</td>')
+                            html_parts.append(f'<td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>')
+                            html_parts.append(f'<td class="col-medium">{row["Total_Sales_Range"]}</td>')
+                            html_parts.append(f'<td class="col-medium">{row["Status"]}</td>')
+                            
+                            for day_col in sorted_day_cols:
+                                day_value = row.get(day_col, 0)
+                                day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
+                                val_show = int(day_value) if isinstance(day_value, (int, float)) else day_value
+                                html_parts.append(f'<td class="col-small {day_class}">{val_show}</td>')
+                            
+                            html_parts.append('</tr>')
+                        
+                        html_parts.append('</tbody></table></div>')
+                        
+                        # แสดงผลทันทีทีละก้อน (Chunk)
+                        st.markdown("".join(html_parts), unsafe_allow_html=True)
+            else: st.error("⚠️ ไม่พบข้อมูลการขายในช่วงเวลานี้")
 
 # --- Page 2: Purchase Orders ---
 elif st.session_state.current_page == "📝 รายการสั่งซื้อ":
