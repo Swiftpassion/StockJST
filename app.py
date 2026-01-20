@@ -2128,7 +2128,6 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     # =========================================================
                     st.markdown("""
                     <style>
-                        /* เอา max-height ออกเพื่อให้ยาวไปเรื่อยๆ ตามข้อมูล */
                         .daily-sales-table-wrapper { 
                             overflow-x: auto; 
                             width: 100%; 
@@ -2139,7 +2138,7 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         }
                         .daily-sales-table { 
                             width: 100%; 
-                            min-width: 1200px; /* เพิ่มความกว้างขั้นต่ำเพื่อให้ไม่เบียดกัน */
+                            min-width: 1200px; 
                             border-collapse: separate; 
                             border-spacing: 0; 
                             font-family: 'Sarabun', sans-serif; 
@@ -2153,7 +2152,6 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         .daily-sales-table tbody tr:hover td { background-color: #333 !important; }
                         .negative-value { color: #FF0000 !important; font-weight: bold !important; }
                         
-                        /* Fix ความกว้างคอลัมน์ให้เหมาะสม */
                         .col-history { width: 40px !important; min-width: 40px !important; }
                         .col-small { width: 80px !important; min-width: 80px !important; }
                         .col-medium { width: 100px !important; min-width: 100px !important; }
@@ -2166,11 +2164,26 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                     
                     curr_token = st.query_params.get("token", "")
                     
-                    # ✅ แก้ไข: เขียน HTML ให้ชิดซ้าย หรือต่อกันเป็นบรรทัดเดียว เพื่อไม่ให้ Streamlit มองเป็น Code Block
-                    html_table = """<div class="daily-sales-table-wrapper"><table class="daily-sales-table"><thead><tr><th class="col-history">ประวัติ</th><th class="col-small">รหัส</th><th class="col-image">รูป</th><th class="col-name">ชื่อสินค้า</th><th class="col-small">คงเหลือ</th><th class="col-medium">ยอดรวม</th><th class="col-medium">สถานะ</th>"""
+                    # ✅ ใช้วิธี List Append แทน String Concatenation (แก้บัคอักขระต่างดาว)
+                    html_parts = []
+                    html_parts.append('<div class="daily-sales-table-wrapper"><table class="daily-sales-table">')
+                    
+                    # --- Header ---
+                    html_parts.append('<thead><tr>')
+                    html_parts.append('<th class="col-history">ประวัติ</th>')
+                    html_parts.append('<th class="col-small">รหัส</th>')
+                    html_parts.append('<th class="col-image">รูป</th>')
+                    html_parts.append('<th class="col-name">ชื่อสินค้า</th>')
+                    html_parts.append('<th class="col-small">คงเหลือ</th>')
+                    html_parts.append('<th class="col-medium">ยอดรวม</th>')
+                    html_parts.append('<th class="col-medium">สถานะ</th>')
+                    
                     for day_col in sorted_day_cols: 
-                        html_table += f'<th class="col-small">{day_col}</th>'
-                    html_table += "</tr></thead><tbody>"
+                        html_parts.append(f'<th class="col-small">{day_col}</th>')
+                    html_parts.append('</tr></thead>')
+                    
+                    # --- Body ---
+                    html_parts.append('<tbody>')
                     
                     for idx, row in final_df.iterrows():
                         current_stock_class = "negative-value" if row['Current_Stock'] < 0 else ""
@@ -2178,33 +2191,38 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
                         safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
                         h_link = f"?history_pid={safe_pid}&token={curr_token}"
                         
-                        # ✅ เรียกใช้ฟังก์ชันลบอักขระพิเศษตรงนี้
+                        # Clean Text ป้องกัน HTML พัง
                         raw_name = str(row.get("Product_Name", ""))
                         clean_name = clean_text_for_html(raw_name)
-
-                        # ถ้าชื่อยาวเกินไป ตัดให้สั้นลง (Optional)
                         if len(clean_name) > 50: clean_name = clean_name[:47] + "..."
 
-                        html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
-                        html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
+                        html_parts.append('<tr>')
+                        html_parts.append(f'<td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>')
+                        html_parts.append(f'<td class="col-small">{row["Product_ID"]}</td>')
                         
                         if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
-                            html_table += f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>'
+                            html_parts.append(f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>')
                         else: 
-                            html_table += f'<td class="col-image"></td>'
+                            html_parts.append('<td class="col-image"></td>')
                         
-                        # ✅ ใส่ clean_name ลงไปในตารางอย่างมั่นใจ
-                        html_table += f'<td class="col-name">{clean_name}</td><td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>'
-                        html_table += f'<td class="col-medium">{row["Total_Sales_Range"]}</td><td class="col-medium">{row["Status"]}</td>'
+                        html_parts.append(f'<td class="col-name">{clean_name}</td>')
+                        html_parts.append(f'<td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>')
+                        html_parts.append(f'<td class="col-medium">{row["Total_Sales_Range"]}</td>')
+                        html_parts.append(f'<td class="col-medium">{row["Status"]}</td>')
                         
                         for day_col in sorted_day_cols:
                             day_value = row.get(day_col, 0)
                             day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
-                            html_table += f'<td class="col-small {day_class}">{int(day_value) if isinstance(day_value, (int, float)) else day_value}</td>'
-                        html_table += '</tr>'
+                            # แปลงค่าเป็น int หากเป็นจำนวนเต็ม เพื่อความสวยงาม
+                            val_show = int(day_value) if isinstance(day_value, (int, float)) else day_value
+                            html_parts.append(f'<td class="col-small {day_class}">{val_show}</td>')
                         
-                    html_table += "</tbody></table></div>"
-                    st.markdown(html_table, unsafe_allow_html=True)
+                        html_parts.append('</tr>')
+                        
+                    html_parts.append('</tbody></table></div>')
+                    
+                    # รวม List เป็น String เดียวแล้วแสดงผล (เร็วกว่าและไม่เพี้ยน)
+                    st.markdown("".join(html_parts), unsafe_allow_html=True)
             else: st.error("⚠️ ไม่พบข้อมูลการขาย")
 
 # --- Page 2: Purchase Orders ---
