@@ -9,6 +9,7 @@ import random
 import string
 import hashlib
 import urllib.parse 
+import re
 from email.mime.text import MIMEText
 from datetime import date, datetime, timedelta
 from google.oauth2 import service_account
@@ -225,6 +226,19 @@ def highlight_negative(val):
     if isinstance(val, (int, float)) and val < 0:
         return 'color: #ff4b4b; font-weight: bold;'
     return ''
+
+def clean_text_for_html(text):
+    if not isinstance(text, str):
+        text = str(text)
+    
+    # 1. ลบอักขระควบคุม (เช่น \n, \r, \t) เปลี่ยนเป็นเว้นวรรค
+    text = re.sub(r'[\r\n\t]+', ' ', text)
+    
+    # 2. เก็บเฉพาะ: ภาษาไทย, อังกฤษ, ตัวเลข, ช่องว่าง, และเครื่องหมาย ( ) . - _ /
+    # อักขระอื่นๆ ที่อาจก่อปัญหา (เช่น " ' < > & % $ #) จะถูกลบทิ้ง
+    text = re.sub(r'[^\u0e00-\u0e7f a-zA-Z0-9\.\-\_\(\)\/]+', '', text)
+    
+    return text.strip()
 
 @st.cache_data(ttl=300)
 def get_stock_from_sheet():
@@ -2163,14 +2177,26 @@ if st.session_state.current_page == "📅 สรุปยอดขายรา�
         
                         safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
                         h_link = f"?history_pid={safe_pid}&token={curr_token}"
-        
+                        
+                        # ✅ เรียกใช้ฟังก์ชันลบอักขระพิเศษตรงนี้
+                        raw_name = str(row.get("Product_Name", ""))
+                        clean_name = clean_text_for_html(raw_name)
+
+                        # ถ้าชื่อยาวเกินไป ตัดให้สั้นลง (Optional)
+                        if len(clean_name) > 50: clean_name = clean_name[:47] + "..."
+
                         html_table += f'<tr><td class="col-history"><a class="history-link" href="{h_link}" target="_self">📜</a></td>'
                         html_table += f'<td class="col-small">{row["Product_ID"]}</td>'
+                        
                         if pd.notna(row.get('Image')) and str(row['Image']).startswith('http'):
                             html_table += f'<td class="col-image"><img src="{row["Image"]}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"></td>'
-                        else: html_table += f'<td class="col-image"></td>'
-                        html_table += f'<td class="col-name">{row.get("Product_Name","")}</td><td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>'
+                        else: 
+                            html_table += f'<td class="col-image"></td>'
+                        
+                        # ✅ ใส่ clean_name ลงไปในตารางอย่างมั่นใจ
+                        html_table += f'<td class="col-name">{clean_name}</td><td class="col-small {current_stock_class}">{row["Current_Stock"]}</td>'
                         html_table += f'<td class="col-medium">{row["Total_Sales_Range"]}</td><td class="col-medium">{row["Status"]}</td>'
+                        
                         for day_col in sorted_day_cols:
                             day_value = row.get(day_col, 0)
                             day_class = "negative-value" if isinstance(day_value, (int, float)) and day_value < 0 else ""
@@ -2376,23 +2402,26 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                 if idx == 0:
                     curr_token = st.query_params.get("token", "")
                     ts = int(time.time() * 1000)
-                    edit_link = f"?edit_po={row['PO_Number']}&edit_pid={row['Product_ID']}&t={ts}&token={curr_token}"
-                    # --- แก้ไขปุ่ม Action (Edit & Delete) ---
+                    
+                    # Encode URL
+                    safe_pid_edit = urllib.parse.quote(str(row['Product_ID']).strip())
+                    safe_po_edit = urllib.parse.quote(str(row['PO_Number']).strip())
+                    
+                    edit_link = f"?edit_po={safe_po_edit}&edit_pid={safe_pid_edit}&t={ts}&token={curr_token}"
                     edit_btn_html = f"""<a href="{edit_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ffc107; cursor:pointer; margin-right: 8px;" title="แก้ไข">✏️</a>"""
                     
-                    # สร้าง Link สำหรับลบ (ส่ง Index ของแถวไป)
                     row_idx_to_delete = row.get("Sheet_Row_Index", 0)
-                    delete_link = f"?delete_idx={row_idx_to_delete}&del_po={row['PO_Number']}&token={curr_token}"
+                    delete_link = f"?delete_idx={row_idx_to_delete}&del_po={safe_po_edit}&token={curr_token}"
                     delete_btn_html = f"""<a href="{delete_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ff4b4b; cursor:pointer;" title="ลบรายการ">🗑️</a>"""
                     
-                    # รวมปุ่มไว้ในช่องเดียวกัน
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{edit_btn_html}{delete_btn_html}</td>'
 
-                    # แปลง " เป็น &quot; เพื่อไม่ให้ HTML Error
-                    full_pname = str(row.get("Product_Name", "")).replace('"', '&quot;')
-                    table_html += f'<td rowspan="{row_count}" class="td-merged" title="{full_pname}">'
+                    raw_pname = str(row.get("Product_Name", ""))
+                    clean_pname = clean_text_for_html(raw_pname)
+
+                    table_html += f'<td rowspan="{row_count}" class="td-merged" title="{clean_pname}">'
                     table_html += f'<b>{row["Product_ID"]}</b><br>'
-                    table_html += f'<div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin: 0 auto; font-size: 12px;">{full_pname}</div>'
+                    table_html += f'<div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin: 0 auto; font-size: 12px;">{clean_pname}</div>'
                     table_html += '</td>'
                     img_src = row.get('Image', '')
                     img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
