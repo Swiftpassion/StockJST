@@ -2362,6 +2362,19 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
             .status-badge { padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; display: inline-block; width: 120px;}
         </style>
         """, unsafe_allow_html=True)
+
+        def fmt_date(d):
+            try:
+                if pd.isna(d) or str(d).lower() == 'nat' or str(d).strip() == "": return "-"
+                # แปลง string เป็น datetime ก่อนถ้าจำเป็น
+                if isinstance(d, str): d = pd.to_datetime(d, errors='coerce')
+                if pd.isna(d): return "-"
+                return d.strftime("%d/%m/%Y")
+            except: return "-"
+
+        def fmt_num(val, decimals=2):
+            try: return f"{float(val):,.{decimals}f}"
+            except: return "0.00"
         
         table_html = """
         <div class='po-table-container'>
@@ -2477,7 +2490,7 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row["PO_Number"]}</td>'
                     
                     # 6. ขนส่ง (แก้บัคตรงนี้: ใส่ Tag td ครอบตัวแปรให้ถูกต้อง)
-                    t_type = str(row.get("Transport_Type", "-"))
+                    t_type = clean_text_for_html(str(row.get("Transport_Type", "-"))) 
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{t_type}</td>'
                     
                     # 7. วันที่สั่ง + วันคาดการณ์
