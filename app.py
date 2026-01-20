@@ -2363,22 +2363,56 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
         </style>
         """, unsafe_allow_html=True)
         
-        table_html = "<div class='po-table-container'><table class='custom-po-table'><thead><tr><th style='width:50px;'>แก้ไข</th><th>รหัสสินค้า</th><th>รูปสินค้า</th><th>สถานะ</th><th>เลข PO</th><th>ประเภทการนำเข้า</th><th style='background-color: #5f00bf;'>วันที่สั่งซื้อ</th><th style='background-color: #5f00bf;'>วันคาดการณ์</th><th style='background-color: #5f00bf;'>วันที่ได้รับ</th><th style='background-color: #5f00bf;'>ระยะเวลา</th><th style='background-color: #5f00bf;'>จำนวนที่ได้รับ</th><th style='background-color: #00bf00;'>จำนวนสั่งซื้อ</th><th style='background-color: #00bf00;'>ต้นทุน/ชิ้น (฿)</th><th>ยอดเงินหยวน (¥)</th><th>ยอดเงินบาทที่ใช้ (฿)</th><th>เรทเงิน</th><th>เรทค่าขนส่ง</th><th>ขนาด (คิว)</th><th>ค่าส่ง</th><th>น้ำหนัก / KG</th><th>ราคา / ชิ้น (หยวน)</th><th style='background-color: #ff6600;'>SHOPEE</th><th>LAZADA</th><th style='background-color: #000000;'>TIKTOK</th><th>หมายเหตุ</th><th>ร้านค้า</th></tr></thead><tbody>"        
-        def fmt_date(d): return d.strftime("%d/%m/%Y") if pd.notna(d) and str(d) != 'NaT' else "-"
-        def fmt_num(val, dec=2): 
-            try: return f"{float(val):,.{dec}f}"
-            except: return "0.00"
+        table_html = """
+        <div class='po-table-container'>
+        <table class='custom-po-table'>
+            <thead>
+                <tr>
+                    <th style='width:60px;'>แก้ไข</th>
+                    <th>รหัสสินค้า</th>
+                    <th style='width:50px;'>รูป</th>
+                    <th>สถานะ</th>
+                    <th>เลข PO</th>
+                    <th>ขนส่ง</th>
+                    <th style='background-color: #5f00bf;'>วันที่สั่งซื้อ</th>
+                    <th style='background-color: #5f00bf;'>วันคาดการณ์</th>
+                    <th style='background-color: #5f00bf;'>วันที่ได้รับ</th>
+                    <th style='background-color: #5f00bf;'>ระยะเวลา</th>
+                    <th style='background-color: #5f00bf;'>รับแล้ว</th>
+                    <th style='background-color: #00bf00;'>สั่งซื้อ</th>
+                    <th style='background-color: #00bf00;'>ต้นทุน/ชิ้น (฿)</th>
+                    <th>ยอดหยวน (¥)</th>
+                    <th>ยอดบาทรวม (฿)</th>
+                    <th>เรทเงิน</th>
+                    <th>เรทขนส่ง</th>
+                    <th>คิว (CBM)</th>
+                    <th>ค่าส่งรวม</th>
+                    <th>น้ำหนัก (KG)</th>
+                    <th>ราคา/ชิ้น (¥)</th>
+                    <th style='background-color: #ff6600;'>SHOPEE</th>
+                    <th>LAZADA</th>
+                    <th style='background-color: #000000;'>TIKTOK</th>
+                    <th>หมายเหตุ</th>
+                    <th>Link</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
 
+        # จัดกลุ่มข้อมูลตาม PO และ สินค้า
         grouped = df_display.groupby(['PO_Number', 'Product_ID'], sort=False)
         
         for group_idx, ((po, pid), group) in enumerate(grouped):
             row_count = len(group)
             first_row = group.iloc[0] 
+            
+            # ตรวจสอบว่าเป็นสินค้าภายในหรือไม่
             is_internal = (str(first_row.get('Transport_Type', '')).strip() == "สินค้าภายใน")
 
-            # คำนวณยอดรวมต่างๆ
+            # --- คำนวณยอดรวมของกลุ่ม ---
             total_order_qty = group['Qty_Ordered'].sum()
             if total_order_qty == 0: total_order_qty = 1 
+            
             total_yuan = group['Total_Yuan'].sum()
             total_ship_cost = group['Ship_Cost'].sum()
             
@@ -2389,125 +2423,155 @@ elif st.session_state.current_page == "📝 รายการสั่งซื
                 for _, r in group.iterrows():
                     calc_total_thb_used += (float(r.get('Total_Yuan',0)) * float(r.get('Yuan_Rate',0)))
 
+            # คำนวณต้นทุนต่อชิ้น
             cost_per_unit_thb = (calc_total_thb_used + total_ship_cost) / total_order_qty if total_order_qty > 0 else 0
             price_per_unit_yuan = total_yuan / total_order_qty if total_order_qty > 0 else 0
             rate = float(first_row.get('Yuan_Rate', 0))
 
-            # สลับสีพื้นหลัง
+            # กำหนดสีพื้นหลังสลับบรรทัด
             bg_color = "#222222" if group_idx % 2 == 0 else "#2e2e2e"
-            s_text = first_row['Status_Text']
-            s_bg = first_row['Status_BG']
-            s_col = first_row['Status_Color']
+            
+            # ดึงค่าสถานะ
+            s_text = first_row.get('Status_Text', '-')
+            s_bg = first_row.get('Status_BG', '#333')
+            s_col = first_row.get('Status_Color', '#fff')
 
-            # --- เริ่ม Loop ย่อยแต่ละแถวในกลุ่มสินค้าเดิม ---
+            # --- เริ่มวนลูปสร้างแถวในตาราง ---
             for idx, (i, row) in enumerate(group.iterrows()):
                 table_html += f'<tr style="background-color: {bg_color};">'
                 
-                # -----------------------------------------------------------
+                # =======================================================
                 # ส่วนที่ 1: คอลัมน์ที่ Merge (แสดงเฉพาะบรรทัดแรกของกลุ่ม)
-                # -----------------------------------------------------------
+                # =======================================================
                 if idx == 0:
-                    # Col 1: ปุ่มแก้ไข/ลบ
+                    # 1. ปุ่มแก้ไข/ลบ
                     curr_token = st.query_params.get("token", "")
                     ts = int(time.time() * 1000)
-                    safe_pid_edit = urllib.parse.quote(str(row['Product_ID']).strip())
-                    safe_po_edit = urllib.parse.quote(str(row['PO_Number']).strip())
-                    
-                    edit_link = f"?edit_po={safe_po_edit}&edit_pid={safe_pid_edit}&t={ts}&token={curr_token}"
-                    edit_btn_html = f"""<a href="{edit_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ffc107; cursor:pointer; margin-right: 8px;" title="แก้ไข">✏️</a>"""
-                    
-                    row_idx_to_delete = row.get("Sheet_Row_Index", 0)
-                    delete_link = f"?delete_idx={row_idx_to_delete}&del_po={safe_po_edit}&token={curr_token}"
-                    delete_btn_html = f"""<a href="{delete_link}" target="_self" style="text-decoration:none; font-size:18px; color:#ff4b4b; cursor:pointer;" title="ลบรายการ">🗑️</a>"""
-                    
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{edit_btn_html}{delete_btn_html}</td>'
+                    safe_pid = urllib.parse.quote(str(row['Product_ID']).strip())
+                    safe_po = urllib.parse.quote(str(row['PO_Number']).strip())
+                    row_idx_del = row.get("Sheet_Row_Index", 0)
 
-                    # Col 2: รหัสสินค้า + ชื่อสินค้า
-                    raw_pname = str(row.get("Product_Name", ""))
-                    clean_pname = clean_text_for_html(raw_pname) # ใช้ฟังก์ชันล้างข้อความ
+                    btn_edit = f"<a href='?edit_po={safe_po}&edit_pid={safe_pid}&t={ts}&token={curr_token}' target='_self' style='text-decoration:none; font-size:18px; margin-right:5px;'>✏️</a>"
+                    btn_del = f"<a href='?delete_idx={row_idx_del}&del_po={safe_po}&token={curr_token}' target='_self' style='text-decoration:none; font-size:18px; color:#ff4b4b;'>🗑️</a>"
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{btn_edit}{btn_del}</td>'
+
+                    # 2. รหัสสินค้า + ชื่อสินค้า (แก้บัคอักขระพิเศษ)
+                    p_name_raw = str(row.get("Product_Name", ""))
+                    p_name_clean = clean_text_for_html(p_name_raw)
+                    p_id = str(row['Product_ID'])
                     
-                    table_html += f'<td rowspan="{row_count}" class="td-merged" title="{clean_pname}">'
-                    table_html += f'<b>{row["Product_ID"]}</b><br>'
-                    table_html += f'<div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin: 0 auto; font-size: 12px;">{clean_pname}</div>'
+                    table_html += f'<td rowspan="{row_count}" class="td-merged" title="{p_name_clean}">'
+                    table_html += f'<div style="font-weight:bold; color:#fff;">{p_id}</div>'
+                    table_html += f'<div style="font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">{p_name_clean}</div>'
                     table_html += '</td>'
-                    img_src = row.get('Image', '')
-                    img_html = f'<img src="{img_src}" width="50" height="50">' if str(img_src).startswith('http') else ''
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{img_html}</td>'
+                    
+                    # 3. รูปภาพ
+                    img_src = str(row.get('Image', ''))
+                    img_tag = f'<img src="{img_src}" style="width:40px; height:40px; object-fit:cover; border-radius:4px;">' if img_src.startswith('http') else ''
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{img_tag}</td>'
+                    
+                    # 4. สถานะ
                     table_html += f'<td rowspan="{row_count}" class="td-merged"><span class="status-badge" style="background-color:{s_bg}; color:{s_col};">{s_text}</span></td>'
+                    
+                    # 5. เลข PO
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{row["PO_Number"]}</td>'
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{row.get("Transport_Type", "-")}</td>'
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(row["Order_Date"])}</td>'
-                    exp_d = row.get('Expected_Date')
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_date(exp_d)}</td>'
+                    
+                    # 6. ขนส่ง (แก้บัคตรงนี้: ใส่ Tag td ครอบตัวแปรให้ถูกต้อง)
+                    t_type = str(row.get("Transport_Type", "-"))
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{t_type}</td>'
+                    
+                    # 7. วันที่สั่ง + วันคาดการณ์
+                    d_ord = fmt_date(row["Order_Date"])
+                    d_exp = fmt_date(row.get("Expected_Date"))
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{d_ord}</td>'
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{d_exp}</td>'
 
-                # -----------------------------------------------------------
-                # ส่วนที่ 2: คอลัมน์ที่ไม่ Merge (ข้อมูลรับของแต่ละรอบ)
-                # -----------------------------------------------------------
-                recv_d = fmt_date(row['Received_Date'])
-                table_html += f'<td>{recv_d}</td>'
+                # =======================================================
+                # ส่วนที่ 2: คอลัมน์ย่อย (ข้อมูลแยกแต่ละแถว)
+                # =======================================================
+                # 8. วันที่ได้รับ
+                d_recv = fmt_date(row['Received_Date'])
+                table_html += f'<td>{d_recv}</td>'
                 
-                wait_val = "-"
+                # 9. ระยะเวลา (Wait)
+                wait_txt = "-"
                 if pd.notna(row['Received_Date']) and pd.notna(row['Order_Date']):
-                    try: wait_val = f"{(row['Received_Date'] - row['Order_Date']).days} วัน"
-                    except: wait_val = "-"
-                table_html += f'<td>{wait_val}</td>'
+                    try: wait_txt = f"{(row['Received_Date'] - row['Order_Date']).days} วัน"
+                    except: pass
+                table_html += f'<td>{wait_txt}</td>'
 
-                qty_recv = int(row.get('Qty_Received', 0))
-                q_style = "color: #ff4b4b; font-weight:bold;" if (qty_recv > 0 and qty_recv != int(row.get('Qty_Ordered', 0))) else "font-weight:bold;"
-                table_html += f'<td style="{q_style}">{qty_recv:,}</td>'
+                # 10. จำนวนที่ได้รับ (Received Qty)
+                q_recv = int(row.get('Qty_Received', 0))
+                q_ord_row = int(row.get('Qty_Ordered', 0))
+                style_q = "color:#ff4b4b; font-weight:bold;" if (q_recv > 0 and q_recv != q_ord_row) else ""
+                table_html += f'<td style="{style_q}">{q_recv:,}</td>'
 
-                # -----------------------------------------------------------
-                # ส่วนที่ 3: คอลัมน์สรุปยอดเงินและอื่นๆ (Merge เหมือนกัน)
-                # -----------------------------------------------------------
+                # =======================================================
+                # ส่วนที่ 3: คอลัมน์สรุป (Merge เหมือนส่วนที่ 1)
+                # =======================================================
                 if idx == 0:
+                    # 11. จำนวนสั่งซื้อรวม
                     table_html += f'<td rowspan="{row_count}" class="td-merged" style="color:#AED6F1; font-weight:bold;">{int(total_order_qty):,}</td>'
+                    
+                    # 12. ต้นทุนต่อชิ้น
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(cost_per_unit_thb)}</td>'
+                    
+                    # 13-14. ยอดเงินรวม (หยวน/บาท)
                     val_yuan = "-" if is_internal else fmt_num(total_yuan)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{val_yuan}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(calc_total_thb_used)}</td>'
-                    val_rate = "-" if is_internal else fmt_num(rate)
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_rate}</td>'
-                    val_ship_rate = "-" if is_internal else fmt_num(row.get("Ship_Rate",0))
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_ship_rate}</td>'
-                    val_cbm = "-" if is_internal else fmt_num(row.get("CBM",0), 4)
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_cbm}</td>'
-                    val_ship_cost = "-" if is_internal else fmt_num(total_ship_cost)
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_ship_cost}</td>'
-                    val_weight = "-" if is_internal else fmt_num(row.get("Transport_Weight",0))
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_weight}</td>'
-                    val_unit_yuan = "-" if is_internal else fmt_num(price_per_unit_yuan)
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{val_unit_yuan}</td>'
+                    
+                    # 15-16. เรทเงิน + เรทขนส่ง
+                    v_rate = "-" if is_internal else fmt_num(rate)
+                    v_ship_rate = "-" if is_internal else fmt_num(row.get("Ship_Rate",0))
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_rate}</td>'
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_ship_rate}</td>'
+                    
+                    # 17-19. CBM, ค่าส่ง, น้ำหนัก
+                    v_cbm = "-" if is_internal else fmt_num(row.get("CBM",0), 4)
+                    v_ship_cost = "-" if is_internal else fmt_num(total_ship_cost)
+                    v_weight = "-" if is_internal else fmt_num(row.get("Transport_Weight",0))
+                    
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_cbm}</td>'
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_ship_cost}</td>'
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_weight}</td>'
+                    
+                    # 20. ราคาต่อชิ้น (หยวน)
+                    v_unit_yuan = "-" if is_internal else fmt_num(price_per_unit_yuan)
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{v_unit_yuan}</td>'
+                    
+                    # 21-23. ราคาขาย (Shopee/Lazada/TikTok)
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("Shopee_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("Lazada_Price",0))}</td>'
                     table_html += f'<td rowspan="{row_count}" class="td-merged">{fmt_num(row.get("TikTok_Price",0))}</td>'
                     
-                    # หมายเหตุ (Clean text ด้วยเพื่อความชัวร์)
-                    clean_note = clean_text_for_html(str(row.get("Note","")))
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{clean_note}</td>'
+                    # 24. หมายเหตุ
+                    note_txt = clean_text_for_html(str(row.get("Note","")))
+                    table_html += f'<td rowspan="{row_count}" class="td-merged" style="font-size:12px;">{note_txt}</td>'
                     
+                    # 25. Link/Contact
                     link_val = str(row.get("Link", "")).strip()
                     wechat_val = str(row.get("WeChat", "")).strip()
+                    icons = ""
+                    if len(link_val) > 5:
+                        s_link = urllib.parse.quote(link_val)
+                        icons += f"<a href='?view_info={s_link}&t={ts}_{idx}&token={curr_token}' style='text-decoration:none; margin-right:5px;'>🔗</a>"
+                    if len(wechat_val) > 1:
+                        s_chat = urllib.parse.quote(wechat_val)
+                        icons += f"<a href='?view_info={s_chat}&t={ts}_{idx}&token={curr_token}' style='text-decoration:none;'>💬</a>"
                     
-                    icons_html = []
-                    
-                    if link_val and link_val.lower() not in ['nan', 'none', '']:
-                        safe_link = urllib.parse.quote(link_val)
-                        icons_html.append(f"""<a href="?view_info={safe_link}&t={ts}_{idx}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; margin-right:5px; color:#007bff;">🔗</a>""")
+                    table_html += f'<td rowspan="{row_count}" class="td-merged">{icons if icons else "-"}</td>'
 
-                    if wechat_val and wechat_val.lower() not in ['nan', 'none', '']:
-                        safe_wechat = urllib.parse.quote(wechat_val)
-                        icons_html.append(f"""<a href="?view_info={safe_wechat}&t={ts}_{idx}&token={curr_token}" target="_self" style="text-decoration:none; font-size:16px; color:#25D366;">💬</a>""")
-                    
-                    final_store_html = "".join(icons_html) if icons_html else "-"
-                    table_html += f'<td rowspan="{row_count}" class="td-merged">{final_store_html}</td>'
-                
-                # ✅ ปิด Tag แถว (สำคัญมาก)
-                table_html += '</tr>'
+                # ปิด Tag แถว
+                table_html += "</tr>"
 
-        # ✅ ปิด Tag ตารางทั้งหมด
+        # ปิด Tag ตาราง
         table_html += "</tbody></table></div>"
+        
+        # แสดงผล
         st.markdown(table_html, unsafe_allow_html=True)
-    else: st.info("ยังไม่มีข้อมูล PO")
+    else:
+        st.info("ยังไม่มีข้อมูลรายการสั่งซื้อ (PO)")
 
 # --- Page 3: Stock ---
 elif st.session_state.current_page == "📈 รายงาน Stock":
